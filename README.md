@@ -1,132 +1,72 @@
 # Inkplate Videotext
 
-A teletext-style wall display built on a Soldered Inkplate 6COLOR. People, scripts and AI agents post pages to a small relay on a Mac, and the board wakes up, pulls the rendered frame over WiFi, draws it and goes back to sleep.
+A teletext-style wall display that runs entirely on a Soldered Inkplate 6COLOR. The board joins your WiFi, shows one screen, and serves an HTTP API and an MCP server, so any agent or script on the local network can replace what the wall shows.
 
-The board stays dumb on purpose. It never accepts connections and knows nothing about layout. The relay owns the grid, the Bedstead teletext font, the colours and every page, so changing how the wall looks never needs a reflash.
+There is nothing to run on a computer. The board stores the screen in flash, renders it with the Bedstead teletext font, and refreshes the panel only when the screen changes.
 
-```
-senders: vt CLI, scripts, agents
-   │  POST /pages/301            (sender token)
-   ▼
-relay on the Mac: stores pages, expires them, renders 600x448 frames
-   ▲
-   │  GET /frame                 (board token, ETag of what it shows)
-   │  → 304 nothing changed, or 200 + frame
-board: wake (timer or button) → fetch → draw if changed → deep sleep
-```
+## Connecting an Agent
 
-## Posting Pages
-
-Every command below runs from the repo root. `npm link` once gives you `vt` instead of `node bin/vt.js`.
+Press the button on the side of the board. The wall shows its IP address, the API key and the exact command to run. For Claude Code:
 
 ```sh
-node bin/vt.js ls                                   # what's live, who owns it
-node bin/vt.js send 301 "Cary, NC · Sunday" --ttl 1d --body "{yellow}Partly sunny{/}  high 90°"
-node bin/vt.js preview 301 --out /tmp/301.png       # the rendered page as a PNG
-node bin/vt.js rm 301
-node bin/vt.js status                               # battery, signal, what the board last got
+claude mcp add --transport http videotext http://<board-ip>/mcp --header "X-Api-Key: <key>"
 ```
 
-`send` prints where the page lands and any warnings. A title over 48 characters gets cut, a body that runs past the page gets truncated, and the relay tells you both. The index only has room for the first 34 characters of a title, so put the important words first. Check `preview` before trusting a layout.
+Use the IP address for Claude Code, since it can't resolve `.local` names. Browsers, curl, Node and other MCP clients can also use `http://videotext.local`. A DHCP reservation for the board keeps the address stable.
 
-### Choosing a Page Number
+The MCP server explains itself. Its instructions and the `show_screen` description carry the complete layout and markup rules, and every call returns a PNG of exactly what the wall will draw. An agent needs nothing beyond the connection.
 
-The wall opens on the lowest-numbered live page, so the number decides what people see without touching the button. Pages run from 101 to 899, and 100 is the generated index. Until someone decides otherwise, this is the house convention:
-
-| Range | Use |
+| Tool | What it does |
 |---|---|
-| 101-199 | Pinned by the owner: what should be on the wall by default |
-| 200-299 | Agent jobs, builds, deploys |
-| 300-399 | Home and weather |
-| 400-499 | Calendar and reminders |
-| 500-899 | Everything else |
+| `show_screen` | Replaces the screen and returns the preview image and any warnings |
+| `preview_screen` | Renders a screen without touching the wall |
+| `get_screen` | Returns the current screen's fields, its state and an image of it |
+| `clear_screen` | Removes the screen, so the wall shows its connection details |
 
-Reuse the page you already own for the same topic, and set `--ttl` to how long the information stays true. A live page belongs to whoever posted it. Posting over someone else's page fails with `page_taken` unless you pass `--replace`, and you should only do that when you mean to.
+## Sending a Screen Over HTTP
 
-### Writing the Body
-
-The body is plain text on a 48-column grid. The `text` layout gives it 14 rows. Lines wrap at word boundaries and blank lines are kept.
-
-Colour tags carry meaning, so use them for status and nothing else:
-
-| Tag | Meaning |
-|---|---|
-| `{red}` | Needs you |
-| `{yellow}` | Attention |
-| `{green}` | Fine |
-| `{blue}` | Information |
-| `{orange}`, `{white}`, `{black}` | Free use |
-
-`{/}` ends a tag. Tagged text sits on a band of that colour, and a tagged run of block characters (`{red}████`) is drawn in the colour itself. Unknown tags show up literally.
-
-Lines between two ```` ``` ```` fences are never wrapped, only cropped at the edge. Use fences for tables and ASCII art. Box drawing (`┌─┐`), block elements (`▀▄█▒`) and teletext sextants (U+1FB00 to U+1FB3B) all tile cleanly. The font covers ASCII, Latin-1, dashes, curly quotes, bullets and arrows. Emoji have no glyph and render as blank space.
-
-### Layouts, Charts and Images
-
-`--layout` picks one of four fixed layouts. Senders never position anything themselves.
-
-| Layout | Text area | Image area |
-|---|---|---|
-| `text` | 48 x 14 | none |
-| `image-left` | 24 x 14, right side | 288 x 336 px, left side |
-| `image-top` | 48 x 6, below | 600 x 168 px |
-| `image` | first body line as caption | 600 x 312 px |
-
-A chart belongs on a `text` page. Pass numbers, never a picture of a chart: `--chart "73 76 81 85 88" --chart-type spark --chart-label "°F by hour"`. A spark chart scales from the lowest to the highest value and labels both, and bars start at zero.
-
-Images are PNG or JPEG up to 4 megapixels, sent with `--image photo.jpg`. `--style dither` suits photos and `--style blocks` gives a chunky mosaic look. Both need a token created with `--images`.
-
-### Urgent Pages
-
-`--urgent` puts the page on the wall at the board's next poll, skipping the usual three-minute wait, and shows a newsflash band on the index. The relay allows this at most once every 10 minutes. Keep it for things that need a person now, since every redraw flashes the whole panel for 30 seconds. The token needs `--urgent`.
-
-## What the Wall Shows
-
-On boot and on every timer wake, the wall shows the lowest-numbered live page. The button steps through the live pages in order, then the index, then back to the first page. Someone who pressed it in the last 10 minutes stays on their page. After that the wall returns to the first page.
-
-Each page has a header with its number, the sender's token name and when it was posted, a double-height title, the body, and a footer with its position, the next page and its expiry. The index lists every live page. With nothing posted it says "Nothing posted" over a stripe of all seven panel colours.
-
-The board polls every `POLL_SECONDS`, 60 on wall power and 900 on battery. The relay lets a timer wake redraw at most once every three minutes, because a redraw is a 30-second full-panel flash, so a change to the first page reaches the wall within about three minutes on wall power.
-
-## HTTP API
-
-Senders who can't run the CLI talk to the relay directly on port 8080 with `Authorization: Bearer <sender token>`.
-
-`POST /pages/:n` takes JSON:
-
-| Field | Notes |
-|---|---|
-| `title` | Required, cut to 48 characters |
-| `body` | Up to 8 KiB of markup |
-| `ttl` | Seconds, or `"90m"`, `"2h"`, `"1d"`. Default 1 day, maximum 7 days |
-| `layout` | `text`, `image-left`, `image-top` or `image` |
-| `chart` | `{"type": "spark"\|"bars", "values": [...], "label": "..."}`, `text` layout only |
-| `image` | `{"data": "<base64>", "style": "dither"\|"blocks"}`, image layouts only |
-| `urgent` | Boolean |
-| `replace` | Boolean, to take over another sender's live page |
-
-A `201` response carries `location` and `warnings`. Errors come back as `{"error": {"code", "message"}}` with a message that says what to change. The other routes are `DELETE /pages/:n`, `GET /pages`, `GET /preview/:n.png` and `GET /status`.
-
-## Setting Up the Wall
-
-1. Install Node 23 or newer and run `npm install`.
-2. Create tokens. `node bin/vt.js token board --rotate` prints the board token once. `node bin/vt.js token add <name> --pages 101-899 --images --urgent --save` creates your sender token and saves it to `~/.config/vt/config.json`. The token name appears on the wall.
-3. Run the relay. `make relay-install` installs it as a login service from this checkout, logging to `relay.log`, and `make relay-uninstall` removes it. `node bin/vt.js serve` runs it in the foreground and prints the `RELAY_HOST` and `RELAY_PORT` lines the board needs.
-4. Copy `sketches/videotext/config.example.h` to `config.h` in the same folder and fill in the WiFi credentials, the Mac's LAN IP and port, the board token and the poll interval. `config.h` is gitignored. A DHCP reservation for the Mac keeps the IP stable.
-5. Switch the board on and run `make upload SKETCH=sketches/videotext`. About 35 seconds later the wall shows "Nothing posted", which means everything works.
-
-The relay can't answer while the Mac sleeps. The board backs off, doubling its sleep up to 30 minutes, and catches up once the Mac wakes. When the board can't get a frame at all, it draws its own black screen naming the cause: WiFi, an unreachable relay, a rejected token, or a relay error.
-
-## For Agents
-
-Agents should read the [videotext skill](.claude/skills/videotext/SKILL.md), which condenses this README into the steps for posting a good page. [AGENTS.md](AGENTS.md) points agents that don't load skills to the same place. Hardware notes, firmware details and the development workflow are in [CLAUDE.md](CLAUDE.md).
-
-To make the skill available to Claude sessions in every project on this Mac, link it into the user skills folder:
+Every request except `GET /` needs the key as `X-Api-Key: <key>` or `Authorization: Bearer <key>`. JSON bodies need `Content-Type: application/json`.
 
 ```sh
-ln -s "$PWD/.claude/skills/videotext" ~/.claude/skills/videotext
+curl -X PUT http://videotext.local/screen \
+  -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"title": "Build status", "body": "{green}main{/} passed\n{red}release{/} failed: 2 tests", "footer": "CI"}'
 ```
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /` | The full guide, no key needed |
+| `GET /screen` | The current screen as JSON, with its state and update time |
+| `PUT /screen` | Replace the screen; only `title` is required |
+| `POST /preview` | Render a screen to PNG without showing it; warnings in `X-Warnings` |
+| `GET /preview` | PNG of what the wall should show now |
+| `DELETE /screen` | Remove the screen |
+| `GET /status` | IP, battery, signal, uptime, refresh state |
+| `POST /mcp` | The MCP endpoint |
+
+## What a Screen Looks Like
+
+The wall is a fixed grid of 50 by 18 character cells, so senders choose words, not positions. The board draws the top row, "VIDEOTEXT" and when the screen was sent. The title is double height and holds 48 characters. The body is 48 characters wide and 14 rows tall, and an optional one-line footer sits at the bottom.
+
+In the body, colour tags carry meaning: `{red}` needs a person, `{yellow}` is attention, `{green}` is fine and `{blue}` is information. Lines between two ```` ``` ```` fences are cropped instead of wrapped and keep their spacing, which is how tables and box-drawing or block-character pictures line up. A `chart` takes numbers, either a `spark` trend or `bars` from zero. `theme` is `dark` or `light`. There are no images.
+
+`GET /` on the board has the complete rules. It's the same text agents receive over MCP.
+
+## How the Wall Behaves
+
+A new screen triggers a full refresh that flashes the panel for about 30 seconds. If several screens arrive during a refresh, the board draws only the newest once it finishes, and the API reply says how long until the new screen is readable. A screen survives power loss and reboots, and the board never redraws a frame that is already on the panel.
+
+The button toggles between the screen and the connection details. The board keeps WiFi on all the time, so it wants USB power; on battery it lasts days, not months.
+
+## Setting Up the Board
+
+1. Install the toolchain from [CLAUDE.md](CLAUDE.md), plus `arduino-cli lib install ArduinoJson`.
+2. Copy `sketches/videotext/config.example.h` to `config.h` in the same folder. Fill in the WiFi network and password, an API key (`openssl rand -hex 8`), the hostname and your time zone. `config.h` is gitignored.
+3. Switch the board on, plug it in and run `make upload SKETCH=sketches/videotext`.
+4. About 30 seconds after it joins WiFi, the wall shows its connection details.
 
 ## Development
 
-`npm test` runs the relay, renderer and CLI tests. `make log LOG_SECONDS=90` captures the board's serial output, one line per wake, without an interactive terminal. `node font/generate-font-data.mjs` regenerates the font table from `font/bedstead.c`, Bedstead's CC0 recreation of the SAA5050 teletext character set.
+`make test-native` builds the renderer and protocol code for the Mac. The renderer has to match the archived Node renderer pixel for pixel across 29 fixtures, and the MCP handler, request validation and PNG encoder have their own tests. `make log LOG_SECONDS=90` captures the board's serial output, one line per redraw. `make font` regenerates the font header from `font/bedstead.c`.
+
+The first version, a Node relay on the Mac serving many pages to a board that polled it, is kept in [archive/relay](archive/relay/README.md).

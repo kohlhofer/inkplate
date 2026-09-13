@@ -38,51 +38,49 @@ Each sketch is a folder under `sketches/` whose `.ino` matches the folder name.
 
 ## videotext
 
-A teletext-style wall display. A Node relay on the Mac renders pages into 600x448 frames,
-and the board wakes, pulls the current frame over WiFi, draws it and sleeps. The board
-never accepts connections; all layout and design live in the relay, so changing how the
-wall looks never needs a reflash. Source: `sketches/videotext/` (firmware), `src/relay/`,
-`src/render/`, `src/image/`, `src/cli/`, `bin/vt.js`, `test/`.
+The board serves one teletext-style screen over HTTP and MCP; README.md covers using
+it. The sketch is `sketches/videotext`:
 
-Text uses Bedstead (`font/bedstead.c`, CC0), the recreation of the Mullard SAA5050 teletext
-character generator: glyphs are pixel-doubled with the chip's corner rounding, on a 50x18
-grid of 12x24 cells with text inset one cell. `node font/generate-font-data.mjs`
-regenerates `font/font-data.js` from it. Block, box-drawing and sextant characters are
-drawn procedurally so they tile.
+- `videotext.ino`: WiFi (IPv6 on, power saving off), mDNS, NTP, LittleFS storage of
+  `/screen.json` and `/drawn.hash`, the WebServer routes, the button, and `drawTask`.
+- `src/render/`: C++17 port of the archived Node renderer, no Arduino headers. Must stay
+  reentrant: previews render in the web server task while `drawTask` renders the panel.
+- `src/app/`: `mcp.cpp` (stateless JSON-RPC), `screen_json.cpp` (request validation shared
+  by HTTP and MCP), `png.cpp` (4-bit palette PNG, stored deflate), `guide.h` (the text agents
+  read; one source for MCP instructions, the `show_screen` description and `GET /`).
 
-Setup, page order, the sender guide and the HTTP API live in README.md. Agents posting
-pages follow `.claude/skills/videotext/SKILL.md`; keep both in step with behaviour changes
-to the relay, renderer or CLI. The relay runs as a login service from this checkout
-(`make relay-install`), so `launchctl kickstart -k gui/$(id -u)/com.videotext.relay`
-picks up relay changes. Relay data (tokens, pages, board status) lives in
-`~/Library/Application Support/videotext` unless `VT_DATA` says otherwise.
+Tasks and state: `loop()` on core 1 runs the web server and button; `drawTask` on core 0
+owns the Inkplate object after `setup()`. Shared fields live in `State` behind
+`stateMutex`. Every change bumps `wantedVersion`; `drawTask` draws the newest version once
+the panel is free and skips frames whose FNV-1a hash matches `/drawn.hash`, so reboots
+don't flash the panel. `display()` waits on the busy pin with `delay(1)`, which yields,
+so a 30 s refresh on core 0 doesn't trip the watchdog.
 
-### When things fail
+### Firmware gotchas
 
-The board draws its own black error screen, separate from the relay's rendering, naming
-the cause and the fix: `WiFi <SSID> not joined`, `can't reach relay <host>:<port>`,
-`board token rejected` (401 or 403, usually a sender token in `BOARD_TOKEN`), or
-`relay error <status>`. A board that has never drawn a page shows it on the first failure;
-one that has shows it on the third, so a single missed poll never replaces the wall. While
-WiFi or the relay is unreachable, sleep doubles each failed wake (2x, 4x ... `POLL_SECONDS`,
-capped at 30 minutes); an error answer from a running relay keeps the normal interval.
-A button press retries immediately.
+- Include the project headers before `Inkplate.h`: InkplateLibrary `#define`s `BLACK` and
+  `WHITE`, which breaks `vt::Color`.
+- Every file that includes ArduinoJson must include it through `src/app/screen_json.h`, which
+  sets `ARDUINOJSON_STRING_LENGTH_SIZE 4`. The 32-bit default caps strings at 65535
+  characters, and an MCP result carries a ~180 KB base64 PNG.
+- ArduinoJson stores numbers that fit a float as floats; `screen_json.cpp` takes chart
+  values back through `%.7g` so labels round like the Node renderer.
+- WebServer keeps a raw body in `arg("plain")` only for non-form content types, so clients
+  must send `Content-Type: application/json`; `curl -d` alone sends a form.
+- Types used in function signatures in the `.ino` must be declared before the first
+  function: the Arduino builder inserts prototypes there.
+- Claude Code can't connect to `http://videotext.local/mcp` (30 s timeout), while curl, Node
+  and the MCP SDK can. Register it with the IP. Without IPv6 on the board, macOS waits 5 s
+  on every `.local` lookup for an AAAA answer.
 
-`make monitor` (interactive) or `make log LOG_SECONDS=90` (scripts and agents) shows one
-line per wake:
-`videotext: reason=timer join=cached wifi_ms=... fetch_ms=... read_ms=... unpack_ms=...
-display_ms=... total_ms=... status=304 page=205 etag=... sleep_s=60`. A no-change wake on
-wall power measured about 1.9 s awake, 1.6 s of it joining WiFi.
+### Checks after flashing
 
-### Hardware check after flashing
+Run `make test-native` before flashing. On the board, with `KEY` from `config.h`:
 
-1. `make monitor` through boot: expect `videotext: cold start` and a `status=200` wake
-   showing the first live page (or 100 when nothing is posted).
-2. Watch a few timer wakes: `status=304` with an unchanged `etag` while nothing changed,
-   `sleep_s` equal to `POLL_SECONDS`, `join=cached` after the first wake.
-3. Press the button: `reason=button` and the next page drawn.
-4. Stop the relay: failures logged with `sleep_s` doubling from the first failed wake, the
-   error screen on the third failure.
-5. Start the relay and press the button: the page redraws and `sleep_s` returns to normal.
-6. Send a page using every colour tag and judge contrast on the panel itself; `preview`
-   PNGs approximate the panel and show white brighter than it is.
+1. `make log LOG_SECONDS=60`: a `drew v1 render_ms=~70 copy_ms=~240 display_ms=~29400` line
+   when the frame differs from what's on the panel, nothing when it matches.
+2. `curl http://videotext.local/` answers the guide; `/status` without the key is 401.
+3. `PUT /screen` three times quickly: the log shows the first and the last drawn, not the middle.
+4. Reset the board: `/status` keeps `hasScreen: true` and `lastDrawSecondsAgo: -1`.
+5. `claude mcp list` shows `videotext ... ✔ Connected`; `show_screen` returns an image.
+6. Press the button: the connection screen appears; press again to return.
