@@ -145,7 +145,46 @@ test("the footer says 'next » 100 front page' on the last live page", () => {
     assert.ok(footerDiffers);
 });
 
-test("a colour band gets one cell of padding on both sides when bordered by plain text (m16)", () => {
+function textPage(body) {
+    return {
+        number: 205,
+        sender: "hooks",
+        postedDisplay: "Sat 12 Sep 14:05",
+        expiresDisplay: "Sun 13 Sep 09:00",
+        title: "t",
+        body,
+        layout: "text",
+        image: null,
+        chart: null,
+    };
+}
+
+const BODY_Y = 8 + 3 * 24; // first body row's top pixel
+const TEXT_X0 = 12; // text is inset one cell
+
+function cellPixels(indices, col, rowTop = BODY_Y) {
+    const out = [];
+    for (let y = rowTop; y < rowTop + 24; y++) {
+        for (let x = TEXT_X0 + col * 12; x < TEXT_X0 + (col + 1) * 12; x++) out.push(indices[y * 600 + x]);
+    }
+    return out;
+}
+
+test("a band's padding never erases the character right before a tag", () => {
+    const { indices } = renderFrame(205, { page: textPage("ab{red}cd{/}ef"), liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark, NOW);
+    const b = cellPixels(indices, 1);
+    assert.ok(b.includes(THEMES.dark.foreground), "the 'b' glyph is still drawn");
+    assert.ok(!b.includes(THEMES.dark.tags.red.bg), "no red band under 'b'");
+});
+
+test("a tagged run of block characters is drawn in the tag's colour without a band", () => {
+    const { indices } = renderFrame(205, { page: textPage("{red}██{/} {yellow}██{/}"), liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark, NOW);
+    assert.ok(cellPixels(indices, 0).every((c) => c === 4), "full block in red");
+    assert.ok(cellPixels(indices, 3).every((c) => c === 5), "full block in yellow");
+    assert.ok(cellPixels(indices, 2).every((c) => c === THEMES.dark.background), "the space between stays background");
+});
+
+test("a colour band bordered by spaces reaches a few pixels into them (m16)", () => {
     const page = {
         number: 205,
         sender: "hooks",
@@ -169,9 +208,8 @@ test("a colour band gets one cell of padding on both sides when bordered by plai
             run = 0;
         }
     }
-    // "FAILED" is 6 cells (72px); with 1 cell (12px) of padding on each
-    // side bordering plain text, the band should be 8 cells (96px) wide.
-    assert.equal(longestRun, 8 * 12);
+    // "FAILED" is 6 cells (72px) plus 4px of padding into each bordering space.
+    assert.equal(longestRun, 6 * 12 + 2 * 4);
 });
 
 test("image-left's text-region background clear doesn't wipe out the image drawn to its left", () => {

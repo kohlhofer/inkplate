@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { PANEL_WIDTH, PANEL_HEIGHT, COLS, CELL_WIDTH, CELL_HEIGHT, createFramebuffer, fillRect, packTo4bpp } from "./grid.js";
 import { drawText, drawGlyph } from "./glyphs.js";
-import { drawProcedural } from "./procedural.js";
+import { drawProcedural, isProceduralCodepoint } from "./procedural.js";
 import { parse as parseMarkup } from "./markup.js";
 import { wrap } from "./wrap.js";
 import { regionsFor, rowY, HEADER_ROW, TITLE_ROW_START, TITLE_ROWS, FOOTER_ROW, TEXT_X, TEXT_COLS } from "./layout.js";
@@ -34,32 +34,61 @@ function rightAlignX(text) {
     return TEXT_X + (TEXT_COLS - cpLength(text)) * CELL_WIDTH;
 }
 
-// Draws one wrapped row of markup spans, resolving each span's colour tag
-// against the theme and falling back from procedural mosaic glyphs to font
-// glyphs per character. A tagged span's background band gets one cell of
-// padding on the side(s) that border plain (untagged) text — never into a
-// neighbouring *tagged* span, which would just paint over it — so an
-// isolated coloured word reads as a band with breathing room instead of a
-// tight box (finding m16).
+// A tag names a panel colour; block art drawn under a tag uses that colour as
+// ink rather than sitting on a band of it.
+const TAG_INK = { black: 0, white: 1, green: 2, blue: 3, red: 4, yellow: 5, orange: 6 };
+
+// Padding a band takes out of the neighbouring space cell on each side. Less
+// than half a cell, so two banded words one space apart keep a visible gap.
+const BAND_PAD = 4;
+
+function isGraphicText(text) {
+    let sawGraphic = false;
+    for (const ch of text) {
+        if (ch === " ") continue;
+        if (!isProceduralCodepoint(ch.codePointAt(0))) return false;
+        sawGraphic = true;
+    }
+    return sawGraphic;
+}
+
+// Draws one wrapped row of markup spans. A tagged span of text gets a band in
+// the tag's colour; a tagged span made only of block, box or sextant
+// characters is drawn in the tag's colour on the page background instead.
+// All bands are painted before any glyph, so a band's padding can never erase
+// a neighbouring character, and padding only reaches into a bordering space
+// or past the row's ends.
 function drawSpans(fb, x0, y, spans, theme, options = {}) {
-    let x = x0;
     const height = options.doubleHeight ? CELL_HEIGHT * 2 : CELL_HEIGHT;
-    for (let i = 0; i < spans.length; i++) {
-        const span = spans[i];
+    const placed = [];
+    let x = x0;
+    for (const span of spans) {
         const tagColor = span.tag ? theme.tags[span.tag] : null;
-        const fg = tagColor ? tagColor.fg : theme.foreground;
-        const textWidth = cpLength(span.text) * CELL_WIDTH;
-        if (tagColor) {
-            const padLeft = i > 0 && spans[i - 1].tag != null ? 0 : CELL_WIDTH;
-            const padRight = i < spans.length - 1 && spans[i + 1].tag != null ? 0 : CELL_WIDTH;
-            fillRect(fb, x - padLeft, y, textWidth + padLeft + padRight, height, tagColor.bg);
-        }
+        const graphic = tagColor != null && isGraphicText(span.text);
+        placed.push({ span, x, tagColor, graphic });
+        x += cpLength(span.text) * CELL_WIDTH;
+    }
+
+    for (let i = 0; i < placed.length; i++) {
+        const { span, x: spanX, tagColor, graphic } = placed[i];
+        if (!tagColor || graphic) continue;
+        const prev = spans[i - 1];
+        const next = spans[i + 1];
+        const padLeft = !prev || (prev.tag == null && prev.text.endsWith(" ")) ? BAND_PAD : 0;
+        const padRight = !next || (next.tag == null && next.text.startsWith(" ")) ? BAND_PAD : 0;
+        const width = cpLength(span.text) * CELL_WIDTH;
+        fillRect(fb, spanX - padLeft, y, width + padLeft + padRight, height, tagColor.bg);
+    }
+
+    for (const { span, x: spanX, tagColor, graphic } of placed) {
+        const fg = graphic ? TAG_INK[span.tag] : tagColor ? tagColor.fg : theme.foreground;
+        let cx = spanX;
         for (const ch of span.text) {
             const codepoint = ch.codePointAt(0);
-            if (!drawProcedural(fb, x, y, codepoint, fg)) {
-                drawGlyph(fb, x, y, codepoint, fg, options);
+            if (!drawProcedural(fb, cx, y, codepoint, fg)) {
+                drawGlyph(fb, cx, y, codepoint, fg, options);
             }
-            x += CELL_WIDTH;
+            cx += CELL_WIDTH;
         }
     }
 }

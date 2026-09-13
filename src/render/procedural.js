@@ -218,6 +218,15 @@ function drawSextant(fb, originX, originY, codepoint, fgIndex) {
     return true;
 }
 
+// The ranges drawProcedural owns: sextants, block elements, box drawing.
+export function isProceduralCodepoint(codepoint) {
+    return (
+        (codepoint >= 0x1fb00 && codepoint <= 0x1fb3b) ||
+        (codepoint >= 0x2580 && codepoint <= 0x259f) ||
+        (codepoint >= 0x2500 && codepoint <= 0x257f)
+    );
+}
+
 // Dispatches by codepoint range. Returns false (nothing drawn) for anything
 // out of scope, so the caller can fall back to glyphs.js/blank.
 export function drawProcedural(fb, originX, originY, codepoint, fgIndex) {
