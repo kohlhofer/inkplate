@@ -37,5 +37,73 @@ Each sketch is a folder under `sketches/` whose `.ino` matches the folder name.
 ## videotext
 
 A teletext-inspired wall display: a Node relay renders pages to frames, the board pulls
-and draws them. See `sketches/videotext/`, `src/`, `bin/vt.js`. Details TBD as the
-implementation lands.
+and draws them over WiFi. The board never accepts connections; all design lives in the
+relay. See `sketches/videotext/`, `src/`, `bin/vt.js`, and the design brief this was
+built from for the full behavioural contract (frame format, HTTP API, markup grammar,
+view resolution).
+
+### Running the relay
+
+`node bin/vt.js serve [--port N]` is the only way to run it — there is no `make relay`.
+Env overrides: `VT_DATA` (data dir, default `~/Library/Application Support/videotext`),
+`VT_HOST` (bind address, default `0.0.0.0`), `VT_PORT` (default 8080), `VT_THEME`
+(`dark`|`light`, default `dark` — a relay restart is required to change it; there is no
+runtime theme switch). `VT_DATA` is how a worktree and the main checkout can share
+state without touching the real data dir from either.
+
+**The relay dies when the laptop sleeps.** `make relay-install` runs it as a LaunchAgent
+(`relay-install.plist.template` + `~/Library/LaunchAgents/com.videotext.relay.plist`,
+`RunAtLoad`+`KeepAlive`) — this is the only keep-running mechanism, and it is opt-in,
+never installed automatically. `make relay-uninstall` reverses it. Logs go to
+`relay.log` in the repo root.
+
+### Tokens
+
+Tokens are local file operations, not an HTTP route: `node bin/vt.js token add <name>
+--pages 200-299 [--images] [--urgent] [--save]`, `token list`, `token revoke <name>`,
+and `token board --rotate` — the *only* way to see the board token's plaintext (no
+separate "show" command, no auto-print on first run). Rotating replaces the previous
+board token immediately. `--save` writes the printed sender token into
+`~/.config/vt/config.json`, which the orchestrator's flash-time step then copies into
+`sketches/videotext/config.h`'s `BOARD_TOKEN` placeholder — this repo's own tooling
+never edits `config.h`.
+
+### CLI round-trip
+
+```
+node bin/vt.js token add demo --pages 200-299 --images --urgent --save
+node bin/vt.js serve &
+node bin/vt.js send 205 "Deploy done" --body "all tests passed"
+node bin/vt.js ls
+node bin/vt.js preview 205 --out /tmp/205.png
+node bin/vt.js status
+node bin/vt.js rm 205
+```
+
+**Legibility test card** (both themes, no built-in test-card code — this is a real
+`vt send`):
+```
+vt send 101 "Legibility test" --body "{red}red{/} {green}green{/} {blue}blue{/} {yellow}yellow{/} {orange}orange{/} {white}white{/} {black}black{/}"
+vt preview 101
+# restart the relay with VT_THEME=light and repeat vt preview 101
+```
+
+### Hardware bring-up checklist (after flashing)
+
+1. Flash with the real `config.h` (WiFi credentials filled in, `BOARD_TOKEN` set from
+   `vt token board --rotate`); watch `make monitor` through boot — expect the cold-start
+   log line (`videotext: cold start etag=empty page=100 failures=0`).
+2. Observe at least 3 full timer poll cycles on serial; confirm the per-wake timing line
+   (`videotext: reason=... wifi_ms=... fetch_ms=... unpack_ms=... display_ms=... total_ms=...
+   status=... page=... etag=...`) each time, and that sleep duration matches `X-Poll` when
+   present, else `POLL_SECONDS`.
+3. Press the wake button; confirm `reason=button` in the log and that the shown page
+   advances per the button cycle.
+4. Stop the relay (Ctrl-C on `vt serve`); confirm the board logs failures, shows the
+   "waiting for relay"/"relay offline since 3 wakes" screens at the documented
+   thresholds, and that the stored ETag is cleared by the 3rd wake.
+5. Restart the relay; confirm the next wake redraws unconditionally (no stray 304) and
+   clears the failure/offline state.
+6. Post the legibility test card in both themes (above) and visually assess each colour
+   tag's contrast on the physical panel — the theme tables are marked PROVISIONAL for
+   exactly this reason.
