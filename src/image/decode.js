@@ -26,6 +26,11 @@ function isJpeg(buf) {
 }
 
 function assertWithinCaps(width, height) {
+    // A zero dimension makes the megapixel product 0 while pngjs still
+    // allocates per row of the other dimension, which is an OOM bomb.
+    if (!(width >= 1 && height >= 1)) {
+        throw new ImageError("image has a zero width or height");
+    }
     const megapixels = (width * height) / 1_000_000;
     if (megapixels > MAX_MEGAPIXELS) {
         throw new ImageError(`image exceeds ${MAX_MEGAPIXELS} megapixels`);

@@ -51,6 +51,11 @@ test("a PNG whose IHDR declares more than 4 megapixels is rejected before pngjs 
     assert.throws(() => decodeImage(fakePngHeader(3000, 3000)), /megapixels/);
 });
 
+test("a PNG with a zero width or height is rejected before pngjs allocates rows for it", () => {
+    assert.throws(() => decodeImage(fakePngHeader(0, 100_000_000)), ImageError);
+    assert.throws(() => decodeImage(fakePngHeader(100_000_000, 0)), ImageError);
+});
+
 test("unsupported formats are rejected", () => {
     assert.throws(() => decodeImage(Buffer.from("not an image")), /unsupported image format/);
 });
