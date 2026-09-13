@@ -73,25 +73,29 @@ The relay can't answer while the Mac sleeps or is off. The board then backs off 
 
 ### What the wall shows
 
-- **P100, the front page**: today's date, a newsflash band while an urgent page is live,
-  and one row per live page (number, title, posted day and time). With no pages it says
-  "Nothing posted" over a stripe of all seven panel colours.
+- **The wall opens on content**: after boot, and on every timer wake, it shows the
+  lowest-numbered live page. The index (P100) is the default only when nothing is live.
+- **The button** steps through the live pages in order, then the index, then back to the
+  first page. Someone who pressed it in the last 10 minutes stays on their page; after
+  that the wall returns to the first page. Presses while the board is drawing (about 15 s)
+  are not registered.
 - **Pages 101-899**: header (number, sender token name, posted date), double-height title,
   body, footer (position, next page, expiry).
-- **The button** steps 100 → each live page in order → 100. A timer wake returns the wall
-  to P100 once the last press is more than 10 minutes old. Presses while the board is
-  drawing (about 15 s) are not registered.
+- **P100, the index**: today's date, a newsflash band while an urgent page is live, and one
+  row per live page (number, title, posted day and time). With no pages it says "Nothing
+  posted" over a stripe of all seven panel colours.
 - **Updates**: the board polls every `POLL_SECONDS`. The relay only lets a timer wake
-  redraw once every 3 minutes (a redraw is a 12 s full-panel flash), so a new normal page
-  shows within about 3 minutes on wall power. An urgent page skips that wait and forces
-  P100 at the next poll, at most once per 10 minutes.
+  redraw once every 3 minutes (a redraw is a 12 s full-panel flash), so a change to the
+  first page shows within about 3 minutes on wall power. An urgent page skips that wait:
+  the wall shows that page itself at the next poll, at most once per 10 minutes. Pick low
+  page numbers for what should be on the wall by default.
 - **Theme**: `VT_THEME=dark` (default) or `light`, read at relay start. The colour tables
   in `src/render/theme.js` are still provisional until checked on the panel.
 
 ### Sender reference
 
 - **CLI**: `node bin/vt.js send <page> <title> [--body text | stdin] [--ttl 2h] [--urgent]
-  [--layout text|image-left|image-top|image] [--image file.png|jpg]
+  [--replace] [--layout text|image-left|image-top|image] [--image file.png|jpg]
   [--style dither|blocks] [--chart "1 2 3" --chart-type spark|bars --chart-label text]`,
   plus `rm <page>`, `ls`, `preview <page> [--out file.png]`, `status`, `token add|list|
   revoke|board`. Unknown flags are rejected.
@@ -99,10 +103,13 @@ The relay can't answer while the Mac sleeps or is off. The board then backs off 
   `title` (required, cut to 48 chars), `body` (max 8 KiB), `ttl` (seconds or `"90m"`,
   `"2h"`, `"1d"`; default 1 day, max 7 days), `urgent` (boolean; token needs `--urgent`),
   `layout`, `image` (`{data: base64, style}`; token needs `--images`; not with `text`),
-  `chart` (`{type, values: up to 600 numbers, label?}`; `text` layout only). Other keys
-  are rejected. `DELETE /pages/:n`, `GET /pages`, `GET /preview/:n.png`, `GET /status`.
+  `chart` (`{type, values: up to 600 numbers, label?}`; `text` layout only), `replace`
+  (boolean). Other keys are rejected. `DELETE /pages/:n`, `GET /pages`,
+  `GET /preview/:n.png`, `GET /status`.
 - **Page ranges**: each sender token may write only its `--pages` range; 100 is
-  generated. Any sender token may read every page. Token names appear on the wall.
+  generated. Ranges may overlap, but a live page belongs to whoever posted it: posting
+  over another sender's live page is `409 page_taken` unless the post sets `replace`,
+  which then warns. Any sender token may read every page. Token names appear on the wall.
 - **Markup**: `{red}` needs you, `{yellow}` attention, `{green}` fine, `{blue}` info,
   `{orange}`, `{white}`, `{black}`; `{/}` resets. Tagged text sits on a band of that
   colour; a tagged run of block characters (`{red}████`) is drawn in that colour. Unknown
@@ -113,9 +120,11 @@ The relay can't answer while the Mac sleeps or is off. The board then backs off 
   mosaic look. PNG or JPEG, up to 4 MP.
 - **Charts**: `spark` scales min to max and labels both; `bars` starts at zero. Columns
   are solid accent colour and snap to whole cells.
-- **Responses**: `201` carries `warnings[]` for anything cut or dropped (title, truncated
-  lines, cropped fences, unknown tags). Errors are `{"error":{"code","message"}}` with a
-  message that says what to change.
+- **Responses**: `201` carries `location` (whether the page is first on the wall, urgent,
+  or behind another page) and `warnings[]` for anything cut, dropped or replaced. Errors
+  are `{"error":{"code","message"}}` with a message that says what to change.
+- **Theme**: in `light`, page numbers and titles are white on a blue band, because blue
+  text is barely distinguishable from black on the panel.
 
 ### When things fail
 
@@ -128,14 +137,16 @@ WiFi or the relay is unreachable, sleep doubles each failed wake (2x, 4x ... `PO
 capped at 30 minutes); an error answer from a running relay keeps the normal interval.
 A button press retries immediately.
 
-`make monitor` shows one line per wake:
+`make monitor` (interactive) or `make log LOG_SECONDS=90` (scripts and agents) shows one
+line per wake:
 `videotext: reason=timer join=cached wifi_ms=... fetch_ms=... read_ms=... unpack_ms=...
-display_ms=... total_ms=... status=304 page=100 etag=... sleep_s=60`. It needs an
-interactive terminal.
+display_ms=... total_ms=... status=304 page=205 etag=... sleep_s=60`. A no-change wake on
+wall power measured about 1.9 s awake, 1.6 s of it joining WiFi.
 
 ### Hardware check after flashing
 
-1. `make monitor` through boot: expect `videotext: cold start` and a `status=200` wake.
+1. `make monitor` through boot: expect `videotext: cold start` and a `status=200` wake
+   showing the first live page (or 100 when nothing is posted).
 2. Watch a few timer wakes: `status=304` with an unchanged `etag` while nothing changed,
    `sleep_s` equal to `POLL_SECONDS`, `join=cached` after the first wake.
 3. Press the button: `reason=button` and the next page drawn.

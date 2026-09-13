@@ -2,7 +2,8 @@
 #   make                      compile sketches/hello
 #   make upload SKETCH=sketches/foo
 #   make monitor
-#   make relay-install        run the videotext relay as a LaunchAgent (opt-in, not automatic)
+#   make log LOG_SECONDS=90   capture serial output without an interactive terminal
+#   make relay-install        run the videotext relay as a login service
 
 SKETCH ?= sketches/hello
 FQBN   := soldered-inkplate-boards:esp32:Inkplate6COLOR
@@ -16,7 +17,7 @@ NODE_BIN    := $(shell command -v node)
 REPO_DIR    := $(CURDIR)
 RELAY_PORT  ?= 8080
 
-.PHONY: compile upload flash monitor port restore-backup relay-install relay-uninstall
+.PHONY: compile upload flash monitor log port restore-backup relay-install relay-uninstall
 
 compile:
 	arduino-cli compile --fqbn $(FQBN) --output-dir $(BUILD) $(SKETCH)
@@ -29,6 +30,15 @@ flash: upload monitor
 
 monitor:
 	arduino-cli monitor --port $(PORT) --config baudrate=115200
+
+# Non-interactive capture (scripts, agents): arduino-cli monitor quits as soon
+# as its stdin closes, so a sleeping pipe holds it open for LOG_SECONDS.
+LOG_SECONDS ?= 90
+log:
+	@test -n "$(PORT)" || (echo "No Inkplate serial port found. Is it plugged in and switched on?" && exit 1)
+	@perl -e 'alarm $(LOG_SECONDS); exec @ARGV' sh -c \
+		'sleep $$(($(LOG_SECONDS) + 5)) | arduino-cli monitor --port $(PORT) --config baudrate=115200 --quiet' | \
+		LC_ALL=C tr -d '\r' || true
 
 port:
 	@echo $(PORT)
