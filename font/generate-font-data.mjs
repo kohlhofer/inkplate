@@ -1,92 +1,112 @@
 #!/usr/bin/env node
-// Converts spleen-12x24.bdf to font-data.js: a plain codepoint -> 24-row
-// bitmap table for ASCII + Latin-1 Supplement, the only ranges videotext
-// renders text in. Run manually when the vendored BDF changes; the output
-// is committed so nothing parses BDF at runtime.
+// Converts the glyph table in bedstead.c (Bedstead, the CC0 recreation of the
+// Mullard SAA5050 teletext character generator; vendored from the GitHub
+// mirror textmodes/bedstead at ae81a7610d89) into font-data.js: a plain
+// codepoint -> 24-row bitmap table. Run manually when bedstead.c changes; the
+// output is committed so nothing parses C at runtime.
+//
+// Each source glyph is a 6x10 matrix (column 0 and row 9 are the inter-glyph
+// gap). It is drawn the way the SAA5050 drew it: every pixel doubled to 2x2,
+// then "character rounding" fills the two half-pixels on either side of any
+// diagonal step, which is what gives teletext its smooth, heavy letterforms.
+// The resulting 12x20 bitmap sits in the 12x24 cell with 2 blank rows above
+// and below.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bdfPath = path.join(here, "spleen-12x24.bdf");
+const sourcePath = path.join(here, "bedstead.c");
 const outPath = path.join(here, "font-data.js");
 
 const CELL_WIDTH = 12;
 const CELL_HEIGHT = 24;
+const SRC_W = 6;
+const SRC_H = 10;
+const TOP_PAD = 2;
 
-// Every Spleen 12x24 glyph shares BBX "12 24 0 -5" (verified against the
-// vendored file), so bitmap rows line up with the cell with no offset math.
-const MIN_CODEPOINT = 0x20; // space
-const MAX_ASCII = 0x7e; // ~
-const MIN_LATIN1 = 0xa0; // NBSP
-const MAX_LATIN1 = 0xff; // ÿ
-
-function inRange(codepoint) {
-    return (
-        (codepoint >= MIN_CODEPOINT && codepoint <= MAX_ASCII) ||
-        (codepoint >= MIN_LATIN1 && codepoint <= MAX_LATIN1)
-    );
+// Drawn procedurally by src/render/procedural.js, so any Bedstead versions are skipped.
+function isProcedural(cp) {
+    return (cp >= 0x2500 && cp <= 0x259f) || (cp >= 0x1fb00 && cp <= 0x1fbff);
 }
 
-const text = readFileSync(bdfPath, "utf8");
-const lines = text.split("\n");
-
-const glyphs = {};
-let encoding = null;
-let bbx = null;
-let rows = null;
-let collecting = false;
-let rowIndex = 0;
-
-for (const line of lines) {
-    if (line.startsWith("STARTCHAR")) {
-        encoding = null;
-        bbx = null;
-        rows = null;
-        collecting = false;
-    } else if (line.startsWith("ENCODING ")) {
-        encoding = parseInt(line.slice("ENCODING ".length).trim(), 10);
-    } else if (line.startsWith("BBX ")) {
-        bbx = line.slice("BBX ".length).trim().split(/\s+/).map(Number);
-    } else if (line.startsWith("BITMAP")) {
-        rows = new Array(CELL_HEIGHT).fill(0);
-        collecting = true;
-        rowIndex = 0;
-    } else if (line.startsWith("ENDCHAR")) {
-        if (encoding !== null && inRange(encoding) && bbx !== null) {
-            if (bbx[0] !== CELL_WIDTH || bbx[1] !== CELL_HEIGHT) {
-                throw new Error(`glyph ${encoding} has unexpected BBX ${bbx.join(" ")}`);
-            }
-            glyphs[encoding] = rows;
-        }
-        collecting = false;
-    } else if (collecting && rowIndex < CELL_HEIGHT) {
-        // Each row is stored as 2 hex bytes (16 bits) for a 12px-wide glyph;
-        // the pixel row is the top 12 bits, left-aligned.
-        rows[rowIndex] = parseInt(line.trim(), 16) >> 4;
-        rowIndex++;
+function parseGlyphs(src) {
+    const re = /\{\{\s*([0-7][0-7,\s]*)\}\s*,\s*(0x[0-9a-fA-F]+)\s*,\s*"[^"]*"/g;
+    const glyphs = new Map();
+    let m;
+    while ((m = re.exec(src))) {
+        const cp = parseInt(m[2], 16);
+        // The SAA5050 set comes first in the file; later duplicates are variants.
+        if (glyphs.has(cp) || isProcedural(cp)) continue;
+        const rows = m[1]
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((s) => parseInt(s, 8));
+        while (rows.length < SRC_H) rows.push(0);
+        glyphs.set(cp, rows);
     }
+    return glyphs;
 }
+
+function renderRounded(rows) {
+    const src = (x, y) => (x >= 0 && x < SRC_W && y >= 0 && y < SRC_H ? (rows[y] >> (SRC_W - 1 - x)) & 1 : 0);
+    const hi = Array.from({ length: SRC_H * 2 }, () => new Array(SRC_W * 2).fill(0));
+    for (let y = 0; y < SRC_H; y++) {
+        for (let x = 0; x < SRC_W; x++) {
+            if (!src(x, y)) continue;
+            hi[2 * y][2 * x] = hi[2 * y][2 * x + 1] = hi[2 * y + 1][2 * x] = hi[2 * y + 1][2 * x + 1] = 1;
+        }
+    }
+    const set = (x, y) => {
+        if (x >= 0 && x < SRC_W * 2 && y >= 0 && y < SRC_H * 2) hi[y][x] = 1;
+    };
+    for (let y = 0; y < SRC_H - 1; y++) {
+        for (let x = 0; x < SRC_W - 1; x++) {
+            const a = src(x, y);
+            const b = src(x + 1, y);
+            const c = src(x, y + 1);
+            const d = src(x + 1, y + 1);
+            if (a && d && !b && !c) {
+                set(2 * x + 2, 2 * y + 1);
+                set(2 * x + 1, 2 * y + 2);
+            }
+            if (b && c && !a && !d) {
+                set(2 * x + 1, 2 * y + 1);
+                set(2 * x + 2, 2 * y + 2);
+            }
+        }
+    }
+    const out = new Array(CELL_HEIGHT).fill(0);
+    for (let y = 0; y < SRC_H * 2; y++) {
+        let bits = 0;
+        for (let x = 0; x < CELL_WIDTH; x++) bits = (bits << 1) | hi[y][x];
+        out[TOP_PAD + y] = bits;
+    }
+    return out;
+}
+
+const glyphs = parseGlyphs(readFileSync(sourcePath, "utf8"));
+
+// Codepoints Bedstead lacks that agent-written text uses.
+glyphs.set(0xa0, glyphs.get(0x20)); // no-break space
+glyphs.set(0xad, glyphs.get(0x2d)); // soft hyphen
+glyphs.set(0x2026, glyphs.get(0x2e).map((row) => (row ? 0o25 : 0))); // ellipsis: three dots on the period's row
 
 const missing = [];
-for (let cp = MIN_CODEPOINT; cp <= MAX_ASCII; cp++) {
-    if (!(cp in glyphs)) missing.push(cp);
-}
-for (let cp = MIN_LATIN1; cp <= MAX_LATIN1; cp++) {
-    if (!(cp in glyphs)) missing.push(cp);
-}
+for (let cp = 0x20; cp <= 0x7e; cp++) if (!glyphs.has(cp)) missing.push(cp);
+for (let cp = 0xa0; cp <= 0xff; cp++) if (!glyphs.has(cp)) missing.push(cp);
 if (missing.length > 0) {
     throw new Error(`missing glyphs for codepoints: ${missing.join(", ")}`);
 }
 
-const entries = Object.keys(glyphs)
-    .map(Number)
+const entries = [...glyphs.keys()]
     .sort((a, b) => a - b)
-    .map((cp) => `    ${cp}: [${glyphs[cp].join(",")}],`)
+    .map((cp) => `    ${cp}: [${renderRounded(glyphs.get(cp)).join(",")}],`)
     .join("\n");
 
-const output = `// Generated by font/generate-font-data.mjs from spleen-12x24.bdf. Do not edit by hand.
+const output = `// Generated by font/generate-font-data.mjs from bedstead.c. Do not edit by hand.
 export const CELL_WIDTH = ${CELL_WIDTH};
 export const CELL_HEIGHT = ${CELL_HEIGHT};
 
@@ -97,4 +117,4 @@ ${entries}
 `;
 
 writeFileSync(outPath, output);
-console.log(`wrote ${Object.keys(glyphs).length} glyphs to ${outPath}`);
+console.log(`wrote ${glyphs.size} glyphs to ${outPath}`);

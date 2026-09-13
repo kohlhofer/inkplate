@@ -29,3 +29,21 @@ test("letter A is non-blank and roughly symmetric", () => {
     const rows = GLYPHS[65];
     assert.ok(rows.some((row) => row !== 0));
 });
+
+function setBits(rows) {
+    return rows.reduce((n, row) => n + row.toString(2).replace(/0/g, "").length, 0);
+}
+
+test("glyphs are drawn SAA5050-style: doubled pixels plus corner rounding on diagonals", () => {
+    // '/' is 5 source pixels in a diagonal: 5 x 4 doubled pixels, plus 2
+    // rounding pixels at each of its 4 diagonal steps.
+    assert.equal(setBits(GLYPHS[0x2f]), 5 * 4 + 4 * 2);
+    // 'L' has no diagonals, so it is exactly its doubled pixels (11 source pixels).
+    assert.equal(setBits(GLYPHS[0x4c]), 11 * 4);
+});
+
+test("covers the punctuation agents write: dashes, curly quotes, bullet, ellipsis", () => {
+    for (const cp of [0x2013, 0x2014, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2026]) {
+        assert.ok(GLYPHS[cp], `missing U+${cp.toString(16)}`);
+    }
+});
