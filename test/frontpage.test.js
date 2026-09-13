@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFramebuffer, PANEL_WIDTH } from "../src/render/grid.js";
-import { renderFrontpage, footerText } from "../src/render/frontpage.js";
+import { renderFrontpage, footerText, bannerPage } from "../src/render/frontpage.js";
 import { rowY, FOOTER_ROW, TITLE_ROW_START } from "../src/render/layout.js";
 import { THEMES } from "../src/render/theme.js";
 
@@ -84,13 +84,30 @@ test("urgent newsflash takes priority over the low-battery banner, and battery r
     assert.equal(readRow(fb, TITLE_ROW_START, theme.tags.yellow.bg), 0);
 });
 
-test("urgentSince older than lastRedrawAt does not trigger the newsflash", () => {
-    const fb = createFramebuffer();
-    renderFrontpage(fb, theme, {
-        liveSummaries: [page({ urgent: true, urgentSince: 500 })],
-        board: { batteryLow: false, lastRedrawAt: 1000 },
-    });
-    assert.equal(readRow(fb, TITLE_ROW_START, theme.tags.red.bg), 0);
+test("the newsflash banner is a pure function of the live page set, independent of board.lastRedrawAt (B3)", () => {
+    // urgentSince (500) is well before lastRedrawAt (1000) — under the old,
+    // broken model this would hide the banner; it must still show, and keep
+    // showing across however many later redraws, as long as the page is
+    // still live and urgent.
+    for (const lastRedrawAt of [1000, 5000, 60_000]) {
+        const fb = createFramebuffer();
+        renderFrontpage(fb, theme, {
+            liveSummaries: [page({ urgent: true, urgentSince: 500 })],
+            board: { batteryLow: false, lastRedrawAt },
+        });
+        assert.ok(readRow(fb, TITLE_ROW_START, theme.tags.red.bg) > 0);
+    }
+});
+
+test("bannerPage picks the live urgent page with the newest urgentSince", () => {
+    const pages = [
+        page({ number: 201, urgent: true, urgentSince: 1000 }),
+        page({ number: 202, urgent: true, urgentSince: 3000 }),
+        page({ number: 203, urgent: false, urgentSince: null }),
+    ];
+    assert.equal(bannerPage(pages).number, 202);
+    assert.equal(bannerPage([page({ urgent: false })]), null);
+    assert.equal(bannerPage([]), null);
 });
 
 test("more than 14 live pages collapse the last row into a '+N more' summary", () => {

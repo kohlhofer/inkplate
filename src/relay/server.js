@@ -7,8 +7,9 @@ import { Store, formatDisplay } from "./store.js";
 import { Board } from "./board.js";
 import { RateLimiter } from "./ratelimit.js";
 import { validatePagePost, validatePageRange, validateFrameTelemetry, PAGE_ROUTE, PREVIEW_ROUTE } from "./validate.js";
-import { resolvePage, shouldCoalesce, isUrgentBypassActive, pollHint } from "../render/view.js";
+import { resolvePage, shouldCoalesce, isUrgentBypassActive } from "../render/view.js";
 import { renderFrame } from "../render/frame.js";
+import { bannerPage } from "../render/frontpage.js";
 import { lint } from "../render/lint.js";
 import { themeFor } from "../render/theme.js";
 import { regionsFor } from "../render/layout.js";
@@ -71,12 +72,13 @@ export function createServer(config = loadConfig()) {
     installUncaughtExceptionHandler();
 
     const maxRequestBytes = config.maxRequestBytes ?? MAX_REQUEST_BYTES;
+    const frameRateLimit = config.frameRateLimit ?? FRAME_RATE_LIMIT;
     const tokens = new TokenStore(config.dataDir);
     const store = new Store(config.dataDir);
     const board = new Board(config.dataDir);
     const theme = themeFor(config.theme);
     const writeLimiter = new RateLimiter(WRITE_RATE_LIMIT.windowMs, WRITE_RATE_LIMIT.max);
-    const frameLimiter = new RateLimiter(FRAME_RATE_LIMIT.windowMs, FRAME_RATE_LIMIT.max);
+    const frameLimiter = new RateLimiter(frameRateLimit.windowMs, frameRateLimit.max);
 
     function authenticate(req) {
         const header = req.headers["authorization"];
@@ -116,9 +118,10 @@ export function createServer(config = loadConfig()) {
 
         const boardSnapshot = board.snapshot();
         const liveSummaries = store.liveSummaries(now);
-        const urgentBypassActive = isUrgentBypassActive(liveSummaries, boardSnapshot, now);
+        const urgentBypassActive = isUrgentBypassActive(reason, liveSummaries, boardSnapshot, now);
+        const hasIfNoneMatch = typeof req.headers["if-none-match"] === "string";
 
-        if (shouldCoalesce({ reason }, boardSnapshot, urgentBypassActive, now)) {
+        if (shouldCoalesce({ reason, hasIfNoneMatch }, boardSnapshot, urgentBypassActive, now)) {
             res.writeHead(304);
             res.end();
             return;
@@ -129,24 +132,28 @@ export function createServer(config = loadConfig()) {
             resolvedNumber === 100 ? { liveSummaries } : { page: loadRenderPage(resolvedNumber, now), liveSummaries };
         const { bytes, etag } = renderFrame(resolvedNumber, snapshot, boardSnapshot, theme);
 
-        board.recordRedraw(now);
-        if (urgentBypassActive) board.recordUrgentBypass(now);
-
+        // An honest If-None-Match match is not a redraw: it touches no board
+        // state at all (finding B2/M2), unlike the coalescing short-circuit
+        // above, which never even gets this far.
         if (req.headers["if-none-match"] === etag) {
             res.writeHead(304, { ETag: etag, "X-Page": String(resolvedNumber) });
             res.end();
             return;
         }
 
-        const headers = {
+        board.recordRedraw(now);
+        if (urgentBypassActive) board.recordUrgentBypass(now);
+        if (resolvedNumber === 100) {
+            const banner = bannerPage(liveSummaries);
+            if (banner) board.recordUrgentAck(banner.urgentSince);
+        }
+
+        res.writeHead(200, {
             "Content-Type": "application/octet-stream",
             "Content-Length": bytes.length,
             ETag: etag,
             "X-Page": String(resolvedNumber),
-        };
-        const poll = pollHint(board.snapshot(), now);
-        if (poll !== undefined) headers["X-Poll"] = String(poll);
-        res.writeHead(200, headers);
+        });
         res.end(bytes);
     }
 

@@ -23,8 +23,6 @@
 #define FRAME_BYTES ((FRAME_WIDTH * FRAME_HEIGHT) / 2)
 #define WIFI_TIMEOUT_MS 15000
 #define HTTP_TIMEOUT_MS 10000
-#define MIN_POLL_SECONDS 30
-#define MAX_POLL_SECONDS 3600
 #define FW_VERSION "1"
 
 Inkplate display;
@@ -121,7 +119,6 @@ void setup() {
     String cause = "";
     bool success = false;
     int httpStatus = -1;
-    int pollHintSeconds = -1;
     uint32_t fetchMs = 0;
     uint32_t unpackMs = 0;
     uint32_t displayMs = 0;
@@ -137,13 +134,13 @@ void setup() {
         HTTPClient http;
         http.setConnectTimeout(HTTP_TIMEOUT_MS);
         http.setTimeout(HTTP_TIMEOUT_MS);
-        const char *headerKeys[] = {"ETag", "X-Page", "X-Poll"};
+        const char *headerKeys[] = {"ETag", "X-Page"};
 
         const uint32_t fetchStart = millis();
         if (http.begin(url)) {
             // Must be called before GET(): without it, these headers read
             // back empty even on a successful response.
-            http.collectHeaders(headerKeys, 3);
+            http.collectHeaders(headerKeys, 2);
             http.addHeader("Authorization", String("Bearer ") + BOARD_TOKEN);
             if (lastEtag[0] != '\0') http.addHeader("If-None-Match", lastEtag);
 
@@ -192,8 +189,6 @@ void setup() {
                 }
                 const String newPage = http.header("X-Page");
                 if (newPage.length() > 0) lastPage = newPage.toInt();
-                const String poll = http.header("X-Poll");
-                if (poll.length() > 0) pollHintSeconds = poll.toInt();
             }
             http.end();
         } else {
@@ -229,9 +224,7 @@ void setup() {
                   lastEtag[0] != '\0' ? lastEtag : "empty");
 
     WiFi.mode(WIFI_OFF);
-    int sleepSeconds = (pollHintSeconds >= MIN_POLL_SECONDS && pollHintSeconds <= MAX_POLL_SECONDS) ? pollHintSeconds
-                                                                                                      : POLL_SECONDS;
-    esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
+    esp_sleep_enable_timer_wakeup((uint64_t)POLL_SECONDS * 1000000ULL);
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_36, 0);
     esp_deep_sleep_start();
 }

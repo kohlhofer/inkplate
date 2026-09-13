@@ -47,3 +47,9 @@ test("recordUrgentBypass stamps lastUrgentBypassAt", () => {
     board.recordUrgentBypass(5000);
     assert.equal(board.snapshot().lastUrgentBypassAt, 5000);
 });
+
+test("recordUrgentAck stamps lastUrgentAckAt with the banner page's urgentSince, not the current time", () => {
+    const board = new Board(tmpDir());
+    board.recordUrgentAck(4200);
+    assert.equal(board.snapshot().lastUrgentAckAt, 4200);
+});

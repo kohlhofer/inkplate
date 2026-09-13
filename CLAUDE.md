@@ -95,8 +95,8 @@ vt preview 101
    log line (`videotext: cold start etag=empty page=100 failures=0`).
 2. Observe at least 3 full timer poll cycles on serial; confirm the per-wake timing line
    (`videotext: reason=... wifi_ms=... fetch_ms=... unpack_ms=... display_ms=... total_ms=...
-   status=... page=... etag=...`) each time, and that sleep duration matches `X-Poll` when
-   present, else `POLL_SECONDS`.
+   status=... page=... etag=...`) each time, and that sleep duration is always `POLL_SECONDS`
+   (there is no server-driven poll hint; see finding m22 in the round-2 fix notes).
 3. Press the wake button; confirm `reason=button` in the log and that the shown page
    advances per the button cycle.
 4. Stop the relay (Ctrl-C on `vt serve`); confirm the board logs failures, shows the

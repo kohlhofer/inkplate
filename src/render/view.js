@@ -1,17 +1,27 @@
 // Pure view resolution: no HTTP, no filesystem, no Date.now()/Math.random().
 // board.js/server.js supply `now` and plain snapshots; see the plan's
 // determinism contract (2.7) for why that split matters.
+//
+// `lastRedrawAt` and "urgent acknowledged" are deliberately two different
+// timestamps (round-2 fix, finding B2/B3/M1/M2): lastRedrawAt is set only
+// when the relay actually sends a 200 frame, for any reason, and drives
+// nothing but coalescing. lastUrgentAckAt is the urgentSince of the newest
+// urgent page that has actually been shown on page 100, and drives nothing
+// but the bypass. An honest 304 (etag already matches) touches neither.
 
 const TEN_MIN_MS = 10 * 60 * 1000;
 export const MIN_REDRAW_INTERVAL_MS = 180000;
 
-// A live page counts as "newly urgent" once, right after urgentSince passes
-// the last redraw — this is what makes the urgent bypass a one-shot event
-// rather than re-firing on every subsequent poll.
-export function isUrgentBypassActive(liveSummaries, board, now) {
-    const newlyUrgent = liveSummaries.some((p) => p.urgentSince && p.urgentSince > board.lastRedrawAt);
-    const bypassCooling = board.lastUrgentBypassAt && now - board.lastUrgentBypassAt < TEN_MIN_MS;
-    return newlyUrgent && !bypassCooling;
+// The bypass forces page 100 onto the wall for an urgent page the board
+// hasn't shown yet. Only a timer/boot wake can trigger it — a button press
+// never triggers or consumes it (M1) — and it's throttled to once per 10
+// minutes so a burst of urgent posts doesn't hammer the board.
+export function isUrgentBypassActive(reason, liveSummaries, board, now) {
+    if (reason !== "timer" && reason !== "boot") return false;
+    const lastAck = board.lastUrgentAckAt ?? 0;
+    const hasUnseenUrgent = liveSummaries.some((p) => p.urgent && p.urgentSince && p.urgentSince > lastAck);
+    const cooling = board.lastUrgentBypassAt && now - board.lastUrgentBypassAt < TEN_MIN_MS;
+    return hasUnseenUrgent && !cooling;
 }
 
 export function resolvePage({ reason, page }, liveSummaries, board, now) {
@@ -29,17 +39,18 @@ export function resolvePage({ reason, page }, liveSummaries, board, now) {
     }
 
     // timer or boot
-    if (isUrgentBypassActive(liveSummaries, board, now)) return 100;
+    if (isUrgentBypassActive(reason, liveSummaries, board, now)) return 100;
     if (reason === "timer" && now - board.lastButtonAt > TEN_MIN_MS) return 100;
     return liveSummaries.some((p) => p.number === page) ? page : 100;
 }
 
-export function shouldCoalesce({ reason }, board, urgentBypassActive, now) {
+// Coalescing only ever skips a *timer* wake, and only when the board itself
+// signals it already has the current frame (If-None-Match present) within
+// the minimum redraw interval — a request with no If-None-Match (fresh
+// board, just-cleared etag, etc.) always gets a rendered response (B2).
+export function shouldCoalesce({ reason, hasIfNoneMatch }, board, urgentBypassActive, now) {
     if (reason !== "timer") return false;
+    if (!hasIfNoneMatch) return false;
     if (urgentBypassActive) return false;
     return now - board.lastRedrawAt < MIN_REDRAW_INTERVAL_MS;
-}
-
-export function pollHint(board, now) {
-    return board.lastUrgentBypassAt && now - board.lastUrgentBypassAt < TEN_MIN_MS ? 30 : undefined;
 }

@@ -17,15 +17,15 @@ function pad(str, width) {
     return str.length >= width ? str.slice(0, width) : str + " ".repeat(width - str.length);
 }
 
-// "Most-recently-newly-urgent": among live pages whose urgentSince is newer
-// than the last redraw (the same "newlyUrgent" condition view.js uses to
-// force page 100), the one that went urgent last.
-function mostRecentlyNewlyUrgent(liveSummaries, board) {
+// The P100 newsflash banner is a pure function of the live page set (finding
+// B3): the live urgent page with the newest urgentSince, shown for as long
+// as it stays live and urgent — no board/redraw state involved, so it can't
+// disappear on the next timer redraw the way it did when this was gated on
+// urgentSince > lastRedrawAt.
+export function bannerPage(liveSummaries) {
     let best = null;
     for (const page of liveSummaries) {
-        if (page.urgent && page.urgentSince && page.urgentSince > board.lastRedrawAt) {
-            if (!best || page.urgentSince > best.urgentSince) best = page;
-        }
+        if (page.urgent && page.urgentSince && (!best || page.urgentSince > best.urgentSince)) best = page;
     }
     return best;
 }
@@ -50,7 +50,7 @@ export function renderFrontpage(fb, theme, { liveSummaries, board }) {
     fillRect(fb, 0, rowY(HEADER_ROW), ROW_WIDTH, CELL_HEIGHT, bg);
     drawText(fb, 0, rowY(HEADER_ROW), "100", fg);
 
-    const urgentPage = mostRecentlyNewlyUrgent(liveSummaries, board);
+    const urgentPage = bannerPage(liveSummaries);
     const bannerKind = urgentPage ? "urgent" : board.batteryLow ? "battery" : "blank";
     const bannerY = rowY(TITLE_ROW_START);
     const bannerH = TITLE_ROWS * CELL_HEIGHT;

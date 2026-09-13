@@ -7,7 +7,33 @@ import http from "node:http";
 import { PNG } from "pngjs";
 import { createServer } from "../src/relay/server.js";
 import { TokenStore } from "../src/relay/tokens.js";
-import { FRAME_BYTES } from "../src/render/grid.js";
+import { Board } from "../src/relay/board.js";
+import { FRAME_BYTES, PANEL_WIDTH, CELL_HEIGHT } from "../src/render/grid.js";
+import { rowY, TITLE_ROW_START } from "../src/render/layout.js";
+import { PALETTE } from "../src/render/palette.js";
+
+function unpackFrameIndex(bytes, x, y) {
+    const byte = bytes[y * (PANEL_WIDTH / 2) + Math.floor(x / 2)];
+    return x % 2 === 0 ? byte >> 4 : byte & 0x0f;
+}
+
+// True if palette index `index`'s RGB appears anywhere in the banner row of
+// a packed /frame buffer (indices) or a decoded /preview PNG (rgba bytes).
+function bannerRowHasIndex(pixels, isPng, index) {
+    const y0 = rowY(TITLE_ROW_START);
+    const rgb = PALETTE[index].rgb;
+    for (let y = y0; y < y0 + CELL_HEIGHT; y++) {
+        for (let x = 0; x < PANEL_WIDTH; x++) {
+            if (isPng) {
+                const i = (y * PANEL_WIDTH + x) * 4;
+                if (pixels[i] === rgb[0] && pixels[i + 1] === rgb[1] && pixels[i + 2] === rgb[2]) return true;
+            } else if (unpackFrameIndex(pixels, x, y) === index) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 function makePngBase64(width, height) {
     const png = new PNG({ width, height });
@@ -71,14 +97,14 @@ function tmpDir() {
 // Every test gets its own dataDir and its own board/sender tokens, created
 // directly via TokenStore before the server (which reads the same file) is
 // constructed — this never touches the real ~/Library/Application Support.
-async function withServer(fn, { theme = "dark", maxRequestBytes } = {}) {
+async function withServer(fn, { theme = "dark", maxRequestBytes, frameRateLimit } = {}) {
     const dataDir = tmpDir();
     const tokens = new TokenStore(dataDir);
     const boardToken = tokens.rotateBoardToken();
     const senderToken = tokens.addSender("hooks", { pages: "200-299", images: true, urgent: true });
     const restrictedToken = tokens.addSender("readonly", { pages: "300-309" });
 
-    const server = createServer({ dataDir, host: "127.0.0.1", port: 0, theme, maxRequestBytes });
+    const server = createServer({ dataDir, host: "127.0.0.1", port: 0, theme, maxRequestBytes, frameRateLimit });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address();
     const base = `http://127.0.0.1:${port}`;
@@ -145,6 +171,127 @@ test("two /frame calls inside 5s from the board token: the second is 429 and boa
         const afterSecond = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
         assert.equal(afterSecond.lastRedrawAt, redrawAt1);
         assert.equal(afterSecond.board.battery, 4.0); // battery=3.0 from the 429'd call was never recorded
+    });
+});
+
+test("a timer request without If-None-Match always renders 200, even inside the coalescing window (B2)", async () => {
+    await withServer(async ({ base, boardToken, dataDir }) => {
+        // Simulate a redraw that "just happened" (well inside
+        // MIN_REDRAW_INTERVAL_MS) directly via on-disk board state, so one
+        // /frame call is enough to prove it's the missing If-None-Match —
+        // not the window — that forces a render.
+        new Board(dataDir).recordRedraw(Date.now());
+
+        const res = await fetch(`${base}/frame?reason=timer`, { headers: auth(boardToken) });
+        assert.equal(res.status, 200);
+    });
+});
+
+test("an honest If-None-Match match leaves lastRedrawAt untouched, unlike a real redraw (B2/M2)", async () => {
+    await withServer(
+        async ({ base, boardToken, senderToken }) => {
+            const first = await fetch(`${base}/frame?reason=boot`, { headers: auth(boardToken) });
+            assert.equal(first.status, 200);
+            const etag = first.headers.get("etag");
+            const afterFirst = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
+
+            // reason=boot never coalesces (shouldCoalesce only applies to
+            // timer), so this exercises the etag-comparison 304 path, not
+            // the coalescing short-circuit; a relaxed /frame limit lets the
+            // test issue two calls without waiting out the real 5s window.
+            const second = await fetch(`${base}/frame?reason=boot`, {
+                headers: { ...auth(boardToken), "If-None-Match": etag },
+            });
+            assert.equal(second.status, 304);
+            const afterSecond = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
+            assert.equal(afterSecond.lastRedrawAt, afterFirst.lastRedrawAt);
+        },
+        { frameRateLimit: { windowMs: 5000, max: 2 } },
+    );
+});
+
+test("a button press never triggers or consumes the urgent bypass (M1)", async () => {
+    await withServer(async ({ base, boardToken, senderToken }) => {
+        await fetch(`${base}/pages/205`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "urgent page", urgent: true }),
+        });
+
+        // Board is currently showing 100 and presses the button: a
+        // timer/boot wake would be forced to 100 by the pending urgent
+        // page, but button must just cycle to the next live page instead.
+        const res = await fetch(`${base}/frame?reason=button&page=100`, { headers: auth(boardToken) });
+        assert.equal(res.status, 200);
+        assert.equal(res.headers.get("x-page"), "205");
+
+        const status = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
+        assert.equal(status.lastUrgentBypassAt, null);
+        assert.equal(status.board.lastUrgentAckAt, null); // never shown on 100, so never acknowledged
+    });
+});
+
+test("an unseen urgent page forces page 100 on a timer wake, and acknowledging it stamps lastUrgentAckAt", async () => {
+    await withServer(async ({ base, boardToken, senderToken }) => {
+        await fetch(`${base}/pages/205`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "urgent page", urgent: true }),
+        });
+
+        const res = await fetch(`${base}/frame?reason=timer&page=205`, { headers: auth(boardToken) });
+        assert.equal(res.status, 200);
+        assert.equal(res.headers.get("x-page"), "100");
+
+        const status = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
+        assert.ok(status.lastUrgentBypassAt);
+        assert.ok(status.board.lastUrgentAckAt);
+    });
+});
+
+test("preview of page 100 shows the same urgent banner the board's /frame gets", async () => {
+    await withServer(async ({ base, boardToken, senderToken }) => {
+        await fetch(`${base}/pages/205`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "urgent page", urgent: true }),
+        });
+
+        const frame = await fetch(`${base}/frame?reason=timer&page=205`, { headers: auth(boardToken) });
+        assert.equal(frame.status, 200);
+        assert.equal(frame.headers.get("x-page"), "100");
+        const frameBytes = new Uint8Array(await frame.arrayBuffer());
+
+        const preview = await fetch(`${base}/preview/100.png`, { headers: auth(senderToken) });
+        const png = PNG.sync.read(Buffer.from(await preview.arrayBuffer()));
+
+        assert.ok(bannerRowHasIndex(frameBytes, false, 4)); // 4 == red, the urgent banner's band
+        assert.ok(bannerRowHasIndex(png.data, true, 4));
+    });
+});
+
+test("a second urgent page posted within the bypass cooldown still shows as the P100 banner", async () => {
+    await withServer(async ({ base, boardToken, senderToken }) => {
+        await fetch(`${base}/pages/205`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "first urgent", urgent: true }),
+        });
+        const first = await fetch(`${base}/frame?reason=timer&page=205`, { headers: auth(boardToken) });
+        assert.equal(first.headers.get("x-page"), "100"); // bypass fired
+
+        await fetch(`${base}/pages/206`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "second urgent", urgent: true }),
+        });
+
+        // The cooldown (proven at the pure view.js level) suppresses a
+        // second forced bypass, but the banner itself is just bannerPage()
+        // over the live set — it must still reflect the newer urgent page.
+        const preview = await fetch(`${base}/preview/100.png`, { headers: auth(senderToken) });
+        const png = PNG.sync.read(Buffer.from(await preview.arrayBuffer()));
+        assert.ok(bannerRowHasIndex(png.data, true, 4));
     });
 });
 

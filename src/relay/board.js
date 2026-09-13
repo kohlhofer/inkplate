@@ -11,6 +11,10 @@ const DEFAULT_STATE = {
     lastRedrawAt: 0,
     lastButtonAt: 0,
     lastUrgentBypassAt: null,
+    // urgentSince of the newest urgent page already shown on page 100 —
+    // distinct from lastRedrawAt (which just tracks the last 200, of any
+    // page, for coalescing). See view.js's header comment (round-2 fix).
+    lastUrgentAckAt: null,
     batteryLow: false,
 };
 
@@ -58,6 +62,8 @@ export class Board {
         this.#save();
     }
 
+    // Only ever called after an actual 200 is sent (any reason) — never on a
+    // coalesced or honest-match 304 (finding B2/M2).
     recordRedraw(now) {
         this.#state.lastRedrawAt = now;
         this.#save();
@@ -65,6 +71,14 @@ export class Board {
 
     recordUrgentBypass(now) {
         this.#state.lastUrgentBypassAt = now;
+        this.#save();
+    }
+
+    // Called whenever page 100 is sent as a 200 with an urgent banner, for
+    // any reason including a button press landing on it (finding M1) — this
+    // is what "brought to the wall" means, independent of the bypass.
+    recordUrgentAck(urgentSince) {
+        this.#state.lastUrgentAckAt = urgentSince;
         this.#save();
     }
 }
