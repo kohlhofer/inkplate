@@ -43,7 +43,10 @@ export function lint({ title, body, layout, chart }) {
                 regionRows: regions.text.rowSpan,
             }));
         }
-        const { warnings: wrapWarnings } = wrap(lines, regions.text.colSpan, rowBudget);
+        // A chart with no text leaves no body rows; wrapping the empty line
+        // against that would report a truncation that loses nothing.
+        const { warnings: wrapWarnings } =
+            chart && !body.trim() ? { warnings: [] } : wrap(lines, regions.text.colSpan, rowBudget);
         warnings.push(...markupWarnings, ...wrapWarnings);
     }
 
