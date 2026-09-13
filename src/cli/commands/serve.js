@@ -3,9 +3,14 @@ import { createServer } from "../../relay/server.js";
 import { loadConfig } from "../../relay/config.js";
 import { TokenStore } from "../../relay/tokens.js";
 
-// The only way to run the relay (no `make relay` — see the plan's Rams
-// finding 27). The relay dies when the laptop sleeps; `make relay-install`
-// is the keep-running mechanism, documented in CLAUDE.md.
+// VPN addresses such as Tailscale's 100.x are not reachable from the board.
+export function isPrivateLan(ip) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+// The only way to run the relay. `make relay-install` runs this as a login
+// service instead; see CLAUDE.md.
 export async function serve(args, cliConfig, relayConfig = loadConfig()) {
     let port;
     for (let i = 0; i < args.length; i++) {
@@ -16,22 +21,27 @@ export async function serve(args, cliConfig, relayConfig = loadConfig()) {
 
     const server = createServer(config);
     await new Promise((resolve, reject) => {
-        server.once("error", reject);
+        server.once("error", (err) => {
+            if (err.code === "EADDRINUSE") {
+                reject(new Error(`port ${config.port} is already in use; is another relay running? (make relay-uninstall stops the login service)`));
+            } else {
+                reject(err);
+            }
+        });
         server.listen(config.port, config.host, resolve);
     });
     console.log(`videotext relay listening on ${config.host}:${config.port} (theme=${config.theme}, data=${config.dataDir})`);
 
-    // The board's config.h needs a real IP for RELAY_HOST, not 0.0.0.0
-    // (finding i2).
-    const lanUrls = Object.values(os.networkInterfaces())
+    // config.h takes a bare IP and a separate port.
+    const lanIps = Object.values(os.networkInterfaces())
         .flat()
-        .filter((i) => i && i.family === "IPv4" && !i.internal)
-        .map((i) => `http://${i.address}:${config.port}`);
-    if (lanUrls.length > 0) {
-        console.log(`board RELAY_HOST candidates: ${lanUrls.join(", ")}`);
+        .filter((i) => i && i.family === "IPv4" && !i.internal && isPrivateLan(i.address))
+        .map((i) => i.address);
+    for (const ip of lanIps) {
+        console.log(`for the board's config.h: #define RELAY_HOST "${ip}"  #define RELAY_PORT ${config.port}`);
     }
 
     if (!new TokenStore(config.dataDir).hasBoardToken()) {
-        console.error("warning: no board token configured yet; run `vt token board --rotate`");
+        console.error("warning: no board token yet; run `node bin/vt.js token board --rotate`");
     }
 }
