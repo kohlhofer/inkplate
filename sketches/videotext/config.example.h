@@ -6,8 +6,8 @@
 #define WIFI_PASS "your-wifi-password"
 
 // Every request except GET / must send this as "X-Api-Key: <key>" or
-// "Authorization: Bearer <key>". Keep it short enough to type from the wall's
-// setup screen; `openssl rand -hex 8` makes a good one.
+// "Authorization: Bearer <key>". A word is fine: it keeps guest devices off the
+// wall and is easy to type from the wall's setup screen, which shows it.
 #define API_KEY "change-me"
 
 // The board answers at http://<HOSTNAME>.local

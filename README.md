@@ -61,7 +61,7 @@ The button toggles between the screen and the connection details. The board keep
 ## Setting Up the Board
 
 1. Install the toolchain from [CLAUDE.md](CLAUDE.md), plus `arduino-cli lib install ArduinoJson`.
-2. Copy `sketches/videotext/config.example.h` to `config.h` in the same folder. Fill in the WiFi network and password, an API key (`openssl rand -hex 8`), the hostname and your time zone. `config.h` is gitignored.
+2. Copy `sketches/videotext/config.example.h` to `config.h` in the same folder. Fill in the WiFi network and password, an API key (a memorable word is fine; the button screen shows it anyway), the hostname and your time zone. `config.h` is gitignored.
 3. Switch the board on, plug it in and run `make upload SKETCH=sketches/videotext`.
 4. About 30 seconds after it joins WiFi, the wall shows its connection details.
 
