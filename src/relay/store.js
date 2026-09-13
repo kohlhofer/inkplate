@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { regionsFor } from "../render/layout.js";
 
 export const SCHEMA_VERSION = 1;
 export const DEFAULT_TTL_SECONDS = 86400;
@@ -158,5 +159,39 @@ export class Store {
         } catch {
             // no sidecar to remove
         }
+    }
+
+    // Reads and validates a page's image sidecar against its stored meta
+    // (finding B1): only returns pixel data when the sidecar's length
+    // matches width*height, every byte is a valid palette index, and the
+    // image fits its layout's image region. A missing/truncated/oversized
+    // sidecar logs once and returns null so the caller renders the page
+    // without the image instead of crashing frame.js's blit.
+    loadImage(record) {
+        if (!record.image) return null;
+        const { style, width, height } = record.image;
+        const buffer = this.getImage(record.number);
+        if (!buffer) {
+            console.error(`videotext: page ${record.number} is missing its image sidecar`);
+            return null;
+        }
+        if (buffer.length !== width * height) {
+            console.error(
+                `videotext: page ${record.number} image sidecar size mismatch (expected ${width * height}, got ${buffer.length})`,
+            );
+            return null;
+        }
+        for (let i = 0; i < buffer.length; i++) {
+            if (buffer[i] > 6) {
+                console.error(`videotext: page ${record.number} image sidecar has an invalid palette index`);
+                return null;
+            }
+        }
+        const region = regionsFor(record.layout).image;
+        if (!region || width > region.w || height > region.h) {
+            console.error(`videotext: page ${record.number} image ${width}x${height} doesn't fit its layout region`);
+            return null;
+        }
+        return { style, width, height, pixels: buffer };
     }
 }

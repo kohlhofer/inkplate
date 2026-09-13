@@ -4,9 +4,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
+import { PNG } from "pngjs";
 import { createServer } from "../src/relay/server.js";
 import { TokenStore } from "../src/relay/tokens.js";
 import { FRAME_BYTES } from "../src/render/grid.js";
+
+function makePngBase64(width, height) {
+    const png = new PNG({ width, height });
+    for (let i = 0; i < width * height; i++) {
+        png.data[i * 4] = 100;
+        png.data[i * 4 + 1] = 150;
+        png.data[i * 4 + 2] = 200;
+        png.data[i * 4 + 3] = 255;
+    }
+    return PNG.sync.write(png).toString("base64");
+}
 
 // Posts a large body with node:http directly (not fetch): the server is
 // expected to answer before fully reading the body, and writes are paced
@@ -302,6 +314,58 @@ test("bad percent-encoded URLs return a clean 4xx", async () => {
     await withServer(async ({ base }) => {
         const res = await fetch(`${base}/frame?page=%E0%A4%A`);
         assert.ok(res.status >= 400 && res.status < 500);
+    });
+});
+
+test("a posted image page renders through /frame (board token) and /preview without crashing", async () => {
+    // One server per combination: /frame is limited to 1 req/5s, so reusing
+    // a single server across combos would race the limiter instead of
+    // exercising each layout/style pair.
+    for (const layout of ["image", "image-left", "image-top"]) {
+        for (const style of ["dither", "blocks"]) {
+            await withServer(async ({ base, senderToken, boardToken }) => {
+                const posted = await fetch(`${base}/pages/210`, {
+                    method: "POST",
+                    headers: { ...auth(senderToken), "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        title: `${layout}/${style}`,
+                        layout,
+                        image: { data: makePngBase64(8, 8), style },
+                    }),
+                });
+                assert.equal(posted.status, 201, `${layout}/${style} POST`);
+
+                const frame = await fetch(`${base}/frame?reason=button&page=210`, { headers: auth(boardToken) });
+                assert.equal(frame.status, 200, `${layout}/${style} /frame`);
+                const bytes = new Uint8Array(await frame.arrayBuffer());
+                assert.equal(bytes.length, FRAME_BYTES);
+
+                const preview = await fetch(`${base}/preview/210.png`, { headers: auth(senderToken) });
+                assert.equal(preview.status, 200, `${layout}/${style} /preview`);
+                const png = new Uint8Array(await preview.arrayBuffer());
+                assert.equal(png[0], 0x89);
+            });
+        }
+    }
+});
+
+test("a truncated image sidecar renders the page without the image instead of 500", async () => {
+    await withServer(async ({ base, senderToken, boardToken, dataDir }) => {
+        const posted = await fetch(`${base}/pages/210`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "t", layout: "image", image: { data: makePngBase64(8, 8), style: "dither" } }),
+        });
+        assert.equal(posted.status, 201);
+
+        fs.writeFileSync(path.join(dataDir, "pages", "210.image.bin"), Buffer.from([1, 2, 3]));
+
+        const frame = await fetch(`${base}/frame?reason=button&page=210`, { headers: auth(boardToken) });
+        assert.equal(frame.status, 200);
+        assert.equal(new Uint8Array(await frame.arrayBuffer()).length, FRAME_BYTES);
+
+        const preview = await fetch(`${base}/preview/210.png`, { headers: auth(senderToken) });
+        assert.equal(preview.status, 200);
     });
 });
 

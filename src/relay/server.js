@@ -86,6 +86,16 @@ export function createServer(config = loadConfig()) {
         return tokens.authenticate(token);
     }
 
+    // A record's `image` field is only {style,width,height}; the pixels live
+    // in a separate sidecar file. Resolve it here (never in frame.js, which
+    // stays a pure pixel compositor) so a missing/truncated sidecar renders
+    // the page without the image instead of 500ing (finding B1).
+    function loadRenderPage(n, now) {
+        const record = store.getLive(n, now);
+        if (!record) return null;
+        return { ...record, image: store.loadImage(record) };
+    }
+
     function handleFrame(req, res, url) {
         const now = Date.now();
         if (!frameLimiter.check("board", now)) {
@@ -116,9 +126,7 @@ export function createServer(config = loadConfig()) {
 
         const resolvedNumber = resolvePage({ reason, page: requestedPage }, liveSummaries, boardSnapshot, now);
         const snapshot =
-            resolvedNumber === 100
-                ? { liveSummaries }
-                : { page: store.getLive(resolvedNumber, now), liveSummaries };
+            resolvedNumber === 100 ? { liveSummaries } : { page: loadRenderPage(resolvedNumber, now), liveSummaries };
         const { bytes, etag } = renderFrame(resolvedNumber, snapshot, boardSnapshot, theme);
 
         board.recordRedraw(now);
@@ -247,7 +255,7 @@ export function createServer(config = loadConfig()) {
         if (n === 100) {
             snapshot = { liveSummaries };
         } else {
-            const page = store.getLive(n, now);
+            const page = loadRenderPage(n, now);
             if (!page) {
                 sendError(res, 404, "not_found", `page ${n} not found`);
                 return;
