@@ -1,0 +1,20 @@
+{
+  "name": "videotext",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Teletext-inspired wall display relay and CLI for the Inkplate 6COLOR.",
+  "type": "module",
+  "bin": {
+    "vt": "bin/vt.js"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=23"
+  }
+}

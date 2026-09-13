@@ -33,3 +33,9 @@ Each sketch is a folder under `sketches/` whose `.ino` matches the folder name.
   (PCAL6416A expander) and 0x51 (PCF85063A RTC), RTC unset, battery ADC 4.23 V, no SD card.
 - `firmware-backup/` holds the full 4MB image read off the board before development;
   `make restore-backup` writes it back.
+
+## videotext
+
+A teletext-inspired wall display: a Node relay renders pages to frames, the board pulls
+and draws them. See `sketches/videotext/`, `src/`, `bin/vt.js`. Details TBD as the
+implementation lands.
