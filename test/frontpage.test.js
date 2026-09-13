@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFramebuffer, PANEL_WIDTH } from "../src/render/grid.js";
 import { renderFrontpage, footerText, bannerPage } from "../src/render/frontpage.js";
-import { rowY, FOOTER_ROW, TITLE_ROW_START, BODY_ROW_START } from "../src/render/layout.js";
+import { rowY, FOOTER_ROW, TITLE_ROW_START, BODY_ROW_START, HEADER_ROW } from "../src/render/layout.js";
 import { THEMES } from "../src/render/theme.js";
 
 function readRow(fb, row, colorIndex) {
@@ -59,6 +59,34 @@ test("no live pages, no urgency, no low battery: the empty-P100 banner and colou
     assert.ok(readRow(fb, TITLE_ROW_START, theme.foreground) > 0); // "Nothing posted" glyphs
     // the colour-check stripe uses every one of the 7 palette indices
     for (let i = 0; i < 7; i++) assert.ok(readRow(fb, BODY_ROW_START, i) > 0, `stripe missing colour ${i}`);
+});
+
+test("the colour stripe clears the title's descenders and outlines the swatch matching the background", () => {
+    for (const t of [THEMES.dark, THEMES.light]) {
+        const fb = createFramebuffer();
+        renderFrontpage(fb, t, { liveSummaries: [], board: { batteryLow: false }, now: NOW });
+        const top = rowY(BODY_ROW_START);
+        for (let y = top; y < top + 8; y++) {
+            for (let x = 0; x < PANEL_WIDTH; x++) assert.equal(fb[y * PANEL_WIDTH + x], t.background);
+        }
+        // the background-coloured swatch is 82 px wide starting at x=12 + 82 * index
+        const x0 = 12 + 82 * t.background;
+        assert.equal(fb[(top + 8) * PANEL_WIDTH + x0 + 40], t.foreground, "top edge of the outline");
+        assert.equal(fb[(top + 14) * PANEL_WIDTH + x0 + 40], t.background, "inside the swatch");
+    }
+});
+
+test("the light theme draws page numbers white on a blue band, the dark theme in yellow text", () => {
+    const summaries = [page({ number: 205 })];
+    const light = createFramebuffer();
+    renderFrontpage(light, THEMES.light, { liveSummaries: summaries, board: { batteryLow: false }, now: NOW });
+    assert.ok(readRow(light, HEADER_ROW, 3) > 4 * 12 * 20, "blue band behind P100");
+    assert.ok(readRow(light, BODY_ROW_START, 3) > 3 * 12 * 20, "blue band behind 205");
+
+    const dark = createFramebuffer();
+    renderFrontpage(dark, THEMES.dark, { liveSummaries: summaries, board: { batteryLow: false }, now: NOW });
+    assert.equal(readRow(dark, HEADER_ROW, 3), 0);
+    assert.ok(readRow(dark, HEADER_ROW, 5) > 0);
 });
 
 test("live pages present, no urgency, no low battery: footer names the first page", () => {

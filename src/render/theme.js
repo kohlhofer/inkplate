@@ -27,7 +27,10 @@ export const THEMES = {
     light: {
         background: 1, // white
         foreground: 0, // black
-        accent: 3, // blue — page numbers, titles, chart highlights (M20)
+        accent: 3, // blue: chart columns, and the band colour below
+        // Blue text is about as dark as black text on the panel, so page
+        // numbers and titles become white on a blue band instead.
+        accentBand: { fg: 1, bg: 3 },
         tags: {
             red: { fg: 1, bg: 4 },
             green: { fg: 1, bg: 2 },

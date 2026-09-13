@@ -1,5 +1,5 @@
 import { GLYPHS, CELL_WIDTH, CELL_HEIGHT } from "../../font/font-data.js";
-import { setPixel } from "./grid.js";
+import { setPixel, fillRect } from "./grid.js";
 
 // Draws one glyph's foreground pixels at (originX, originY); the caller is
 // expected to have already filled the background (cells are opaque blocks,
@@ -30,4 +30,19 @@ export function drawText(fb, originX, originY, text, fgIndex, options = {}) {
         drawGlyph(fb, x, originY, ch.codePointAt(0), fgIndex, options);
         x += CELL_WIDTH;
     }
+}
+
+// Page numbers and titles. A theme whose accent colour is too close to its
+// text colour to read as an accent sets `accentBand`, and gets white text on
+// a band of that colour instead.
+export function drawAccentText(fb, originX, originY, text, theme, options = {}) {
+    if (!theme.accentBand) {
+        drawText(fb, originX, originY, text, theme.accent, options);
+        return;
+    }
+    let width = 0;
+    for (const _ of text) width += CELL_WIDTH;
+    const height = options.doubleHeight ? 2 * CELL_HEIGHT : CELL_HEIGHT;
+    fillRect(fb, originX - 4, originY, width + 8, height, theme.accentBand.bg);
+    drawText(fb, originX, originY, text, theme.accentBand.fg, options);
 }

@@ -1,5 +1,5 @@
-import { drawText } from "./glyphs.js";
-import { fillRect, BORDER, COLS, CELL_WIDTH, CELL_HEIGHT } from "./grid.js";
+import { drawText, drawAccentText } from "./glyphs.js";
+import { fillRect, COLS, CELL_WIDTH, CELL_HEIGHT } from "./grid.js";
 import { HEADER_ROW, TITLE_ROW_START, TITLE_ROWS, BODY_ROW_START, BODY_ROWS, FOOTER_ROW, rowY, TEXT_X, TEXT_COLS } from "./layout.js";
 import { cpLength, cpSlice, shortDayTime } from "./text.js";
 
@@ -52,7 +52,7 @@ export function footerText(bannerKind, board, liveSummaries) {
 function drawHeader(fb, theme, now) {
     fillRect(fb, 0, rowY(HEADER_ROW), ROW_WIDTH, CELL_HEIGHT, theme.background);
     const y = rowY(HEADER_ROW);
-    drawText(fb, TEXT_X, y, "P100", theme.accent);
+    drawAccentText(fb, TEXT_X, y, "P100", theme);
     drawText(fb, TEXT_X + 4 * CELL_WIDTH, y, "  VIDEOTEXT", theme.foreground);
     const dateStr = formatDate(now);
     drawText(fb, rightAlignX(dateStr), y, dateStr, theme.foreground);
@@ -85,12 +85,26 @@ function drawBanner(fb, theme, bannerKind, urgentPage) {
 // A thin strip of all 7 panel colours side by side — shown once, in place
 // of the (otherwise empty) listing, on a freshly-flashed board with nothing
 // posted yet. Doubles as an at-a-glance colour check (M22).
-function drawColorStripe(fb, y, height) {
-    const segmentWidth = Math.floor(ROW_WIDTH / 7);
-    let x = 0;
+// It sits inside the text columns, a few pixels below the title's descenders,
+// and the swatch that matches the page background gets an outline so all
+// seven colours stay countable.
+const STRIPE_HEIGHT = 12;
+const STRIPE_GAP = 8;
+
+function drawColorStripe(fb, theme, rowTop) {
+    const width = TEXT_COLS * CELL_WIDTH;
+    const segmentWidth = Math.floor(width / 7);
+    const y = rowTop + STRIPE_GAP;
+    let x = TEXT_X;
     for (let i = 0; i < 7; i++) {
-        const w = i === 6 ? ROW_WIDTH - x : segmentWidth;
-        fillRect(fb, x, y, w, height, i);
+        const w = i === 6 ? TEXT_X + width - x : segmentWidth;
+        fillRect(fb, x, y, w, STRIPE_HEIGHT, i);
+        if (i === theme.background) {
+            fillRect(fb, x, y, w, 1, theme.foreground);
+            fillRect(fb, x, y + STRIPE_HEIGHT - 1, w, 1, theme.foreground);
+            fillRect(fb, x, y, 1, STRIPE_HEIGHT, theme.foreground);
+            fillRect(fb, x + w - 1, y, 1, STRIPE_HEIGHT, theme.foreground);
+        }
         x += w;
     }
 }
@@ -106,7 +120,7 @@ function drawListingRow(fb, theme, y, page) {
         fillRect(fb, TEXT_X - 4, y, cpLength(number) * CELL_WIDTH + 8, CELL_HEIGHT, RED_INDEX);
         drawText(fb, TEXT_X, y, number, WHITE_INDEX);
     } else {
-        drawText(fb, TEXT_X, y, number, theme.accent);
+        drawAccentText(fb, TEXT_X, y, number, theme);
     }
 
     const title = cpSlice(page.title, 0, TITLE_FIELD);
@@ -124,7 +138,7 @@ function drawListing(fb, theme, liveSummaries, bannerKind) {
         const y = rowY(BODY_ROW_START + i);
         fillRect(fb, 0, y, ROW_WIDTH, CELL_HEIGHT, theme.background);
         if (bannerKind === "empty") {
-            if (i === 0) drawColorStripe(fb, y, BORDER);
+            if (i === 0) drawColorStripe(fb, theme, y);
             continue;
         }
         if (i >= LISTING_ROWS) continue; // the reserved blank separator row

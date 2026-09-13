@@ -111,7 +111,25 @@ test("the header's page number is drawn in the theme's accent colour", () => {
     assert.ok(accentInHeader);
 });
 
-test("the footer says 'next » 100 front page' on the last live page", () => {
+test("a long footer is cut with an ellipsis and keeps two blank cells before the expiry", () => {
+    const page = { ...textPage(""), number: 205 };
+    const liveSummaries = [{ number: 205, title: "a" }, { number: 301, title: "Cary, NC · Sunday 13 Sep weather" }];
+    const { indices } = renderFrame(205, { page, liveSummaries }, board({}), THEMES.dark, NOW);
+    const footerTop = 8 + 17 * 24;
+    // "expires Sun 09:00" is 17 cells, right-aligned in the 48 text cells (0-47): it starts at
+    // cell 31, so the left side may use at most cells 0-28 and cells 29-30 stay blank.
+    for (const col of [29, 30]) {
+        assert.ok(cellPixels(indices, col, footerTop).every((c) => c === THEMES.dark.background), `cell ${col} blank`);
+    }
+    const lastLeftCell = [28, 27].find((col) => cellPixels(indices, col, footerTop).includes(THEMES.dark.foreground));
+    assert.ok(lastLeftCell !== undefined, "the cut left side ends right before the gap");
+    // The ellipsis glyph is three dots on one row: only a few pixels, all in the lower half of the cell.
+    const pixels = cellPixels(indices, lastLeftCell, footerTop);
+    const lit = pixels.map((c, i) => (c === THEMES.dark.foreground ? Math.floor(i / 12) : -1)).filter((row) => row >= 0);
+    assert.ok(lit.length > 0 && lit.every((row) => row >= 12), "last left cell is the ellipsis");
+});
+
+test("the footer names the index as next on the last live page", () => {
     const page = {
         number: 300,
         sender: "hooks",

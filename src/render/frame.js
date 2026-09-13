@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { PANEL_WIDTH, PANEL_HEIGHT, COLS, CELL_WIDTH, CELL_HEIGHT, createFramebuffer, fillRect, packTo4bpp } from "./grid.js";
-import { drawText, drawGlyph } from "./glyphs.js";
+import { drawText, drawGlyph, drawAccentText } from "./glyphs.js";
 import { drawProcedural, isProceduralCodepoint } from "./procedural.js";
 import { parse as parseMarkup } from "./markup.js";
 import { wrap } from "./wrap.js";
@@ -110,25 +110,24 @@ function drawHeader(fb, theme, page) {
     fillRow(fb, HEADER_ROW, CELL_HEIGHT, theme.background);
     const y = rowY(HEADER_ROW);
     const numberStr = String(page.number);
-    drawText(fb, TEXT_X, y, numberStr, theme.accent);
+    drawAccentText(fb, TEXT_X, y, numberStr, theme);
     drawText(fb, TEXT_X + cpLength(numberStr) * CELL_WIDTH, y, `  ${page.sender}`, theme.foreground);
     drawText(fb, rightAlignX(page.postedDisplay), y, page.postedDisplay, theme.foreground);
 }
 
-// Footer, real pages (M17/i4/m15): left "<i>/<N> · next » <page> <title>"
-// (or "next » 100 front page" past the last live page), right "expires
-// <day> <HH:MM>" (the short day+time form, same as the P100 listing's
-// M21 format — the full display doesn't leave enough of the 48-column
-// budget for the left side on a single-page board), both cut to fit.
+// Footer, real pages: left "<i>/<N> · next » <page> <title>" (or "next » 100
+// index" after the last live page, since the index comes last in the button
+// cycle), right "expires <day> <HH:MM>". The left side is cut with an
+// ellipsis, keeping two cells clear before the expiry.
 function drawFooter(fb, theme, page, liveSummaries) {
     fillRow(fb, FOOTER_ROW, CELL_HEIGHT, theme.background);
     const idx = liveSummaries.findIndex((p) => p.number === page.number);
     const next = liveSummaries[idx + 1];
-    const nextLabel = next ? `${next.number} ${next.title}` : "100 front page";
+    const nextLabel = next ? `${next.number} ${next.title}` : "100 index";
     const rightText = `expires ${shortDayTime(page.expiresDisplay)}`;
-    const leftBudget = Math.max(0, TEXT_COLS - cpLength(rightText) - 1);
+    const leftBudget = Math.max(0, TEXT_COLS - cpLength(rightText) - 2);
     let leftText = `${idx + 1}/${liveSummaries.length} · next » ${nextLabel}`;
-    if (cpLength(leftText) > leftBudget) leftText = cpSlice(leftText, 0, leftBudget);
+    if (cpLength(leftText) > leftBudget) leftText = `${cpSlice(leftText, 0, leftBudget - 1).trimEnd()}…`;
 
     const y = rowY(FOOTER_ROW);
     drawText(fb, TEXT_X, y, leftText, theme.foreground);
@@ -140,7 +139,7 @@ function renderRealPage(fb, theme, page, liveSummaries) {
 
     fillRow(fb, TITLE_ROW_START, TITLE_ROWS * CELL_HEIGHT, theme.background);
     const title = cpSlice(page.title, 0, TEXT_COLS);
-    drawText(fb, TEXT_X, rowY(TITLE_ROW_START), title, theme.accent, { doubleHeight: true });
+    drawAccentText(fb, TEXT_X, rowY(TITLE_ROW_START), title, theme, { doubleHeight: true });
 
     const regions = regionsFor(page.layout);
     if (regions.image) drawImage(fb, regions.image, page.image);
