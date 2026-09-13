@@ -91,6 +91,14 @@ test("liveSummaries lists only live pages, ascending", () => {
     assert.deepEqual(numbers, [250, 300]);
 });
 
+test("liveSummaries strips colour tags from the bodyStart snippet", () => {
+    const store = new Store(tmpDir());
+    const now = 1000;
+    store.put(205, { title: "t", body: "{green}all tests passed{/} extra", postedDisplay: "x", expiresAt: now + 1000 }, now);
+    const [summary] = store.liveSummaries(now);
+    assert.equal(summary.bodyStart, "all tests passed extra");
+});
+
 test("formatDisplay renders 'Day D Mon HH:MM' including the day of week", () => {
     const ms = new Date(2026, 8, 12, 14, 5).getTime(); // Sat 12 Sep 2026, 14:05 local
     assert.equal(formatDisplay(ms), "Sat 12 Sep 14:05");

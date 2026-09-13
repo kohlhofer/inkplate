@@ -102,10 +102,13 @@ export class Store {
         for (const n of this.listNumbers()) {
             const record = this.getLive(n, now);
             if (!record) continue;
+            // Strips colour tags for the P100 listing snippet only; the
+            // stored body (and the real page's own render) keep them.
+            const plainBody = (record.body ?? "").replace(/\{[a-z/]*\}/gi, "");
             summaries.push({
                 number: record.number,
                 title: record.title,
-                bodyStart: (record.body ?? "").split("\n")[0].slice(0, 40),
+                bodyStart: plainBody.split("\n")[0].slice(0, 40),
                 postedDisplay: record.postedDisplay,
                 urgent: !!record.urgent,
                 urgentSince: record.urgentSince ?? null,
