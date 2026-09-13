@@ -1,5 +1,5 @@
 build/
 firmware-backup/
 node_modules/
-sketches/videotext/config.h
+config.h
 relay.log

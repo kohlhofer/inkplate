@@ -17,7 +17,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const sourcePath = path.join(here, "bedstead.c");
+// bedstead.c stays at the repo root, where the board firmware's font generator also reads it.
+const sourcePath = path.join(here, "..", "..", "..", "font", "bedstead.c");
 const outPath = path.join(here, "font-data.js");
 
 const CELL_WIDTH = 12;
