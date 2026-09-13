@@ -148,7 +148,10 @@ export function createServer(config = loadConfig()) {
         const hasIfNoneMatch = typeof req.headers["if-none-match"] === "string";
 
         if (shouldCoalesce({ reason, hasIfNoneMatch }, boardSnapshot, urgentBypassActive, now)) {
-            res.writeHead(304);
+            // Echo the board's own ETag back: a 304 without one would read as
+            // "no ETag" to a client that refreshes its cache on every success,
+            // and the next request (no If-None-Match) would force a full redraw.
+            res.writeHead(304, { ETag: req.headers["if-none-match"], "X-Page": String(requestedPage) });
             res.end();
             return;
         }

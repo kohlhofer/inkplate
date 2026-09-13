@@ -221,6 +221,25 @@ test("a timer request without If-None-Match always renders 200, even inside the 
     });
 });
 
+test("a coalesced 304 echoes the request's If-None-Match as its ETag so the board keeps its cache", async () => {
+    await withServer(
+        async ({ base, boardToken }) => {
+            // A real redraw puts the next timer poll inside the coalescing window.
+            const first = await fetch(`${base}/frame?reason=boot`, { headers: auth(boardToken) });
+            assert.equal(first.status, 200);
+
+            // A stale ETag would normally render; coalescing answers first.
+            const res = await fetch(`${base}/frame?reason=timer&page=100`, {
+                headers: { ...auth(boardToken), "If-None-Match": "abc123" },
+            });
+            assert.equal(res.status, 304);
+            assert.equal(res.headers.get("etag"), "abc123");
+            assert.equal(res.headers.get("x-page"), "100");
+        },
+        { frameRateLimit: { windowMs: 5000, max: 2 } },
+    );
+});
+
 test("an honest If-None-Match match leaves lastRedrawAt untouched, unlike a real redraw (B2/M2)", async () => {
     await withServer(
         async ({ base, boardToken, senderToken }) => {
