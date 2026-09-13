@@ -2,19 +2,31 @@ import { fillRect, CELL_HEIGHT, CELL_WIDTH } from "./grid.js";
 import { drawText } from "./glyphs.js";
 import { cpLength } from "./text.js";
 
-// Draws a chart into a pixel rect: whole CELL_HEIGHT-tall cells in the
-// theme's foreground, topped by a sub-cell (eighth-height granularity)
-// accent-coloured cap for the fractional remainder — cell-snapped bars read
-// cleanly on the panel instead of the old pixel-exact heights, which gave a
-// ragged, non-grid-aligned edge (finding M23). "spark" packs columns
-// edge-to-edge and scales min→max (so a flat-ish series doesn't render as a
-// solid slab); "bars" leaves a 1px gap between columns and stays 0-based,
-// since a bar chart's zero baseline is meaningful in a way a line chart's
-// isn't.
+// Draws a chart into a pixel rect. Every column is one solid block of the
+// theme's accent colour, its height quantised to eighths of a cell. "spark"
+// packs columns edge to edge and scales min→max, with the minimum kept as a
+// one-eighth stub so no reading disappears; "bars" stays 0-based with a 3 px
+// gap, since a bar chart's zero baseline means something. Column widths snap
+// to whole cells once they are at least a cell wide, and a series wider than
+// the rect is averaged down to fit.
 const MIN_MAX_LABEL_ROWS = 1; // reserved at top/bottom of the rect for spark's labels
+const BAR_GAP = 3;
 
 function eighthHeight(eighths) {
     return Math.round((CELL_HEIGHT * eighths) / 8);
+}
+
+function bucket(values, maxColumns) {
+    if (values.length <= maxColumns) return values;
+    const out = [];
+    for (let i = 0; i < maxColumns; i++) {
+        const start = Math.floor((i * values.length) / maxColumns);
+        const end = Math.max(start + 1, Math.floor(((i + 1) * values.length) / maxColumns));
+        let sum = 0;
+        for (let j = start; j < end; j++) sum += values[j];
+        out.push(sum / (end - start));
+    }
+    return out;
 }
 
 function formatChartValue(v) {
@@ -41,44 +53,42 @@ export function splitChartRows({ hasLabel, naturalBodyRows, regionRows }) {
 }
 
 export function drawChart(fb, rect, chart, theme) {
-    const { values, type } = chart;
-    const n = values.length;
-    if (n === 0) return;
+    const { type } = chart;
+    if (chart.values.length === 0) return;
 
-    const showMinMax = type === "spark";
-    const labelRows = showMinMax ? MIN_MAX_LABEL_ROWS : 0;
+    const spark = type === "spark";
+    const gap = spark ? 0 : BAR_GAP;
+    const values = bucket(chart.values, spark ? rect.w : Math.floor((rect.w + gap) / (1 + gap)));
+    const n = values.length;
+
+    const labelRows = spark ? MIN_MAX_LABEL_ROWS : 0;
     const barTop = rect.y + labelRows * CELL_HEIGHT;
     const barHeight = Math.max(CELL_HEIGHT, rect.h - labelRows * 2 * CELL_HEIGHT);
     const rows = Math.max(1, Math.round(barHeight / CELL_HEIGHT));
 
-    const gap = type === "bars" ? 1 : 0;
-    const colWidth = Math.max(1, Math.floor((rect.w - gap * (n - 1)) / n));
+    let colWidth = Math.max(1, Math.floor((rect.w - gap * (n - 1)) / n));
+    if (colWidth >= CELL_WIDTH) colWidth -= colWidth % CELL_WIDTH;
 
-    const min = type === "spark" ? Math.min(...values) : 0;
-    const max = Math.max(min + 1, ...values); // +1 floor avoids a div-by-zero on a flat series
-    const range = max - min;
+    const dataMin = Math.min(...values);
+    const dataMax = Math.max(...values);
+    const min = spark ? dataMin : Math.min(0, dataMin);
+    const range = dataMax - min || 1;
 
     let x = rect.x;
     for (const raw of values) {
-        const value = Math.max(min, raw);
-        const fraction = (value - min) / range; // 0..1
-        const eighths = Math.round(fraction * rows * 8);
-        const wholeCells = Math.floor(eighths / 8);
-        const remainder = eighths % 8;
-
-        if (wholeCells > 0) {
-            fillRect(fb, x, barTop + barHeight - wholeCells * CELL_HEIGHT, colWidth, wholeCells * CELL_HEIGHT, theme.foreground);
-        }
-        if (remainder > 0) {
-            const h = eighthHeight(remainder);
-            fillRect(fb, x, barTop + barHeight - wholeCells * CELL_HEIGHT - h, colWidth, h, theme.accent);
+        const fraction = (Math.max(min, raw) - min) / range; // 0..1
+        let eighths = Math.round(fraction * rows * 8);
+        if (spark) eighths = Math.max(1, eighths);
+        if (eighths > 0) {
+            const h = eighthHeight(eighths);
+            fillRect(fb, x, barTop + barHeight - h, colWidth, h, theme.accent);
         }
         x += colWidth + gap;
     }
 
-    if (showMinMax) {
-        const maxLabel = formatChartValue(max);
-        const minLabel = formatChartValue(min);
+    if (spark) {
+        const maxLabel = formatChartValue(dataMax);
+        const minLabel = formatChartValue(dataMin);
         drawText(fb, rect.x + rect.w - cpLength(maxLabel) * CELL_WIDTH, rect.y, maxLabel, theme.foreground);
         drawText(fb, rect.x + rect.w - cpLength(minLabel) * CELL_WIDTH, rect.y + rect.h - CELL_HEIGHT, minLabel, theme.foreground);
     }

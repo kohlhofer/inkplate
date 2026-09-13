@@ -22,73 +22,77 @@ function countColor(fb, y0, y1, colorIndex) {
     return n;
 }
 
-// A realistic rect: 5 grid rows tall (120px), well over the label rows a
-// spark chart reserves, so bar heights actually snap to whole cells.
+// 5 grid rows tall (120px): spark reserves one label row top and bottom,
+// leaving 3 cell-rows of bar area.
 const rect = { x: 0, y: 0, w: 4 * 12, h: 5 * CELL_HEIGHT };
 
-test("the max value in a spark chart reaches the top of the (whole-cell) bar area", () => {
+test("the max value in a spark chart fills the whole bar area", () => {
     const fb = createFramebuffer();
     drawChart(fb, rect, { type: "spark", values: [1, 10] }, theme);
-    // 1 label row reserved top+bottom leaves 3 whole cell-rows of bar area.
-    assert.equal(columnHeight(fb, rect.w - 1, rect, theme.foreground), 3 * CELL_HEIGHT);
+    assert.equal(columnHeight(fb, rect.w / 2, rect, theme.accent), 3 * CELL_HEIGHT);
 });
 
-test("spark scales min-to-max: the minimum value draws no column, even though it isn't zero", () => {
+test("spark keeps the minimum visible as a one-eighth stub", () => {
     const fb = createFramebuffer();
     drawChart(fb, rect, { type: "spark", values: [3, 10] }, theme);
-    assert.equal(columnHeight(fb, 0, rect, theme.foreground), 0);
-    assert.equal(columnHeight(fb, 0, rect, theme.accent), 0);
+    assert.equal(columnHeight(fb, 0, rect, theme.accent), 3);
 });
 
-test("bars stay 0-based: a flat series of positive bars still draws full-height columns", () => {
-    const fb = createFramebuffer();
-    drawChart(fb, rect, { type: "bars", values: [4, 4, 4] }, theme);
-    const heights = [0, rect.w / 3, (2 * rect.w) / 3].map((x) => columnHeight(fb, Math.floor(x), rect, theme.foreground));
-    for (const h of heights) assert.ok(h > 0);
-});
-
-test("a flat spark series (no variation) draws at the baseline, not as a solid slab", () => {
+test("a flat spark series draws stubs at the baseline, not a solid slab", () => {
     const fb = createFramebuffer();
     drawChart(fb, rect, { type: "spark", values: [4, 4, 4] }, theme);
-    for (const x of [0, Math.floor(rect.w / 2), rect.w - 1]) {
-        assert.equal(columnHeight(fb, x, rect, theme.foreground), 0);
+    for (const x of [0, 16, 32]) assert.equal(columnHeight(fb, x, rect, theme.accent), 3);
+});
+
+test("every column is a single colour: no foreground pixels inside the bar area", () => {
+    const fb = createFramebuffer();
+    drawChart(fb, rect, { type: "spark", values: [2, 7, 5, 9] }, theme);
+    assert.equal(countColor(fb, rect.y + CELL_HEIGHT, rect.y + rect.h - CELL_HEIGHT, theme.foreground), 0);
+    assert.ok(countColor(fb, rect.y + CELL_HEIGHT, rect.y + rect.h - CELL_HEIGHT, theme.accent) > 0);
+});
+
+test("bars stay 0-based: a flat series of positive bars draws full-height columns", () => {
+    const fb = createFramebuffer();
+    drawChart(fb, rect, { type: "bars", values: [4, 4, 4] }, theme);
+    assert.equal(columnHeight(fb, 0, rect, theme.accent), rect.h);
+});
+
+test("bars leave a visible gap between columns", () => {
+    const fb = createFramebuffer();
+    drawChart(fb, rect, { type: "bars", values: [10, 10, 10] }, theme);
+    let empty = 0;
+    for (let x = 0; x < rect.w; x++) empty += columnHeight(fb, x, rect, theme.accent) === 0 ? 1 : 0;
+    assert.ok(empty >= 3);
+});
+
+test("column widths snap to whole cells once a column is at least a cell wide", () => {
+    const wide = { x: 0, y: 0, w: 576, h: 5 * CELL_HEIGHT };
+    const fb = createFramebuffer();
+    drawChart(fb, wide, { type: "spark", values: [1, 2, 3, 4, 5, 6, 7] }, theme); // 576/7 = 82 -> 72
+    assert.ok(columnHeight(fb, 7 * 72 - 1, wide, theme.accent) > 0);
+    assert.equal(columnHeight(fb, 7 * 72, wide, theme.accent), 0);
+});
+
+test("a series wider than the rect never draws past its right edge", () => {
+    const narrow = { x: 12, y: 0, w: 100, h: 5 * CELL_HEIGHT };
+    const fb = createFramebuffer();
+    drawChart(fb, narrow, { type: "spark", values: Array.from({ length: 600 }, (_, i) => i % 17) }, theme);
+    for (let x = narrow.x + narrow.w; x < PANEL_WIDTH; x++) {
+        assert.equal(columnHeight(fb, x, narrow, theme.accent), 0);
     }
 });
 
-test("bars leave a gap between columns; spark packs them edge to edge", () => {
-    const fb = createFramebuffer();
-    drawChart(fb, rect, { type: "bars", values: [10, 10, 10] }, theme);
-    let filled = 0;
-    for (let x = 0; x < rect.w; x++) filled += columnHeight(fb, x, rect, theme.foreground) > 0 ? 1 : 0;
-    assert.ok(filled < rect.w);
-});
-
-test("a sub-cell remainder is drawn in the accent colour, on top of the whole-cell body", () => {
-    const fb = createFramebuffer();
-    // rows = 3; value 5 of range [0,10] (0-based bars) -> exactly half of 3
-    // cells = 1 whole cell + a 4-eighths (half-cell) accent cap.
-    drawChart(fb, rect, { type: "bars", values: [5, 10] }, theme);
-    assert.ok(columnHeight(fb, 0, rect, theme.accent) > 0);
-});
-
-test("spark prints right-aligned max/min labels beside the chart", () => {
+test("spark prints the real max and min beside the chart", () => {
     const fb = createFramebuffer();
     drawChart(fb, rect, { type: "spark", values: [3, 10] }, theme);
-    assert.ok(countColor(fb, rect.y, rect.y + CELL_HEIGHT, theme.foreground) > 0); // "10" top-right
-    assert.ok(countColor(fb, rect.y + rect.h - CELL_HEIGHT, rect.y + rect.h, theme.foreground) > 0); // "3" bottom-right
+    assert.ok(countColor(fb, rect.y, rect.y + CELL_HEIGHT, theme.foreground) > 0);
+    assert.ok(countColor(fb, rect.y + rect.h - CELL_HEIGHT, rect.y + rect.h, theme.foreground) > 0);
 });
 
-test("bars charts reserve no label rows: the max-value bar reaches the very top of the rect", () => {
+test("bars charts reserve no label rows: the max-value bar reaches the top of the rect", () => {
     const fb = createFramebuffer();
     drawChart(fb, rect, { type: "bars", values: [10] }, theme);
-    assert.equal(fb[rect.y * PANEL_WIDTH + 0], theme.foreground);
-});
-
-test("spark charts reserve a label row: even the max value doesn't reach the very top of the rect", () => {
-    const fb = createFramebuffer();
-    drawChart(fb, rect, { type: "spark", values: [1, 10] }, theme);
-    assert.notEqual(fb[rect.y * PANEL_WIDTH + (rect.w - 1)], theme.foreground);
-    assert.notEqual(fb[rect.y * PANEL_WIDTH + (rect.w - 1)], theme.accent);
+    assert.equal(fb[rect.y * PANEL_WIDTH + 0], theme.accent);
 });
 
 test("empty values draws nothing and does not throw", () => {
