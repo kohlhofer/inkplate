@@ -64,9 +64,11 @@ export class Board {
     }
 
     // Only ever called after an actual 200 is sent (any reason) — never on a
-    // coalesced or honest-match 304 (finding B2/M2).
-    recordRedraw(now) {
+    // coalesced or honest-match 304 (finding B2/M2). `page` is the page that
+    // was sent, which after a button press differs from the one requested.
+    recordRedraw(now, page) {
         this.#state.lastRedrawAt = now;
+        if (page !== undefined) this.#state.page = page;
         this.#save();
     }
 

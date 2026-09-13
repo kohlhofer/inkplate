@@ -42,6 +42,13 @@ test("a button reason updates lastButtonAt; a timer reason does not", () => {
     assert.equal(board.snapshot().lastButtonAt, 1000);
 });
 
+test("recordRedraw records the page actually sent, not the one the board asked for", () => {
+    const board = new Board(tmpDir());
+    board.recordFetch({ page: 100, reason: "button" }, 1000);
+    board.recordRedraw(1000, 206);
+    assert.equal(board.snapshot().page, 206);
+});
+
 test("recordUrgentBypass stamps lastUrgentBypassAt", () => {
     const board = new Board(tmpDir());
     board.recordUrgentBypass(5000);

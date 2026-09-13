@@ -170,7 +170,7 @@ export function createServer(config = loadConfig()) {
             return;
         }
 
-        board.recordRedraw(now);
+        board.recordRedraw(now, resolvedNumber);
         if (urgentBypassActive) board.recordUrgentBypass(now);
         if (resolvedNumber === 100) {
             const banner = bannerPage(liveSummaries);
