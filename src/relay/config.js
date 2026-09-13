@@ -15,6 +15,12 @@ export function loadConfig(env = process.env) {
 
 export const MAX_REQUEST_BYTES = 2 * 1024 * 1024; // 2 MiB
 export const REQUEST_TIMEOUT_MS = 10000;
+// A slow/idle client shouldn't be able to hold a connection open (and so
+// starve /healthz and everything else on a device with no per-IP cap) for
+// the full 10s requestTimeout; headers must land within 5s, and the server
+// re-checks idle connections against these timeouts every 2s (finding m31).
+export const HEADERS_TIMEOUT_MS = 5000;
+export const CONNECTIONS_CHECKING_INTERVAL_MS = 2000;
 export const MAX_CONNECTIONS = 64;
 
 // In-memory, reset on relay restart — a home device doesn't need persistence

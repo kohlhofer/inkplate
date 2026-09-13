@@ -1,12 +1,30 @@
+import fs from "node:fs";
 import http from "node:http";
 import { PNG } from "pngjs";
-import { loadConfig, MAX_REQUEST_BYTES, REQUEST_TIMEOUT_MS, MAX_CONNECTIONS, WRITE_RATE_LIMIT, FRAME_RATE_LIMIT } from "./config.js";
+import {
+    loadConfig,
+    MAX_REQUEST_BYTES,
+    HEADERS_TIMEOUT_MS,
+    REQUEST_TIMEOUT_MS,
+    CONNECTIONS_CHECKING_INTERVAL_MS,
+    MAX_CONNECTIONS,
+    WRITE_RATE_LIMIT,
+    FRAME_RATE_LIMIT,
+} from "./config.js";
 import { sendError, ValidationError } from "./httpError.js";
 import { TokenStore } from "./tokens.js";
 import { Store, formatDisplay } from "./store.js";
 import { Board } from "./board.js";
 import { RateLimiter } from "./ratelimit.js";
-import { validatePagePost, validatePageRange, validateFrameTelemetry, PAGE_ROUTE, PREVIEW_ROUTE } from "./validate.js";
+import {
+    validatePagePost,
+    validatePageRange,
+    validateFrameTelemetry,
+    validateReason,
+    parsePreviewNumber,
+    PAGE_ROUTE,
+    PREVIEW_ROUTE,
+} from "./validate.js";
 import { resolvePage, shouldCoalesce, isUrgentBypassActive } from "../render/view.js";
 import { renderFrame } from "../render/frame.js";
 import { bannerPage } from "../render/frontpage.js";
@@ -71,6 +89,13 @@ function buildPreviewPng(indices) {
 export function createServer(config = loadConfig()) {
     installUncaughtExceptionHandler();
 
+    // Belt-and-braces alongside each store's own mkdir(..., {mode: 0o700}):
+    // that mode is only honoured when a directory doesn't already exist, so
+    // an upgrade onto a pre-existing, more-permissive data dir wouldn't
+    // otherwise get locked down (finding m32).
+    fs.mkdirSync(config.dataDir, { recursive: true });
+    fs.chmodSync(config.dataDir, 0o700);
+
     const maxRequestBytes = config.maxRequestBytes ?? MAX_REQUEST_BYTES;
     const frameRateLimit = config.frameRateLimit ?? FRAME_RATE_LIMIT;
     const tokens = new TokenStore(config.dataDir);
@@ -110,7 +135,8 @@ export function createServer(config = loadConfig()) {
             rssi: url.searchParams.get("rssi"),
             fw: url.searchParams.get("fw"),
         });
-        const reason = url.searchParams.get("reason") ?? "boot";
+        // Validated before board.recordFetch below ever stores it (m30).
+        const reason = validateReason(url.searchParams.get("reason"));
         const parsedPage = Number(url.searchParams.get("page"));
         const requestedPage = Number.isInteger(parsedPage) ? parsedPage : 100;
 
@@ -228,6 +254,10 @@ export function createServer(config = loadConfig()) {
             now,
         );
 
+        // Only a successful write counts against the rate limit (m11): the
+        // gate before this handler runs is writeLimiter.peek (read-only).
+        writeLimiter.record(sender.name, now);
+
         res.writeHead(201, { "Content-Type": "application/json" });
         res.end(
             JSON.stringify({
@@ -244,11 +274,12 @@ export function createServer(config = loadConfig()) {
     function handleDeletePage(req, res, digits, sender) {
         const now = Date.now();
         const n = validatePageRange(sender, digits);
-        const existed = store.remove(n, now);
+        const existed = store.remove(n);
         if (!existed) {
             sendError(res, 404, "not_found", `page ${n} not found`);
             return;
         }
+        writeLimiter.record(sender.name, now);
         res.writeHead(204);
         res.end();
     }
@@ -259,9 +290,9 @@ export function createServer(config = loadConfig()) {
         res.end(JSON.stringify(numbers));
     }
 
-    function handlePreview(req, res, digits) {
+    function handlePreview(req, res, rawSegment) {
         const now = Date.now();
-        const n = Number(digits);
+        const n = parsePreviewNumber(rawSegment);
         const liveSummaries = store.liveSummaries(now);
         let snapshot;
         if (n === 100) {
@@ -352,7 +383,10 @@ export function createServer(config = loadConfig()) {
             }
 
             if (route === "postPage" || route === "deletePage") {
-                if (!writeLimiter.check(auth.name, Date.now())) {
+                // Read-only gate: only a request that actually succeeds
+                // (2xx) calls writeLimiter.record, inside the handler below
+                // (finding m11).
+                if (!writeLimiter.peek(auth.name, Date.now())) {
                     const retrySec = Math.ceil(writeLimiter.retryAfterMs(auth.name, Date.now()) / 1000);
                     sendError(res, 429, "rate_limited", `too many writes; try again in ${retrySec}s`);
                     return;
@@ -387,8 +421,9 @@ export function createServer(config = loadConfig()) {
         }
     });
 
-    server.headersTimeout = REQUEST_TIMEOUT_MS;
+    server.headersTimeout = HEADERS_TIMEOUT_MS;
     server.requestTimeout = REQUEST_TIMEOUT_MS;
+    server.connectionsCheckingInterval = CONNECTIONS_CHECKING_INTERVAL_MS;
     server.maxConnections = MAX_CONNECTIONS;
 
     // A client that keeps writing after we respond and close (the 401-

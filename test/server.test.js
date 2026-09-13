@@ -159,6 +159,40 @@ test("a sender token may not fetch /frame, and the board token may not use sende
     });
 });
 
+test("headersTimeout/connectionsCheckingInterval are tightened; requestTimeout stays 10s (m31)", () => {
+    const server = createServer({ dataDir: tmpDir(), host: "127.0.0.1", port: 0, theme: "dark" });
+    assert.equal(server.headersTimeout, 5000);
+    assert.equal(server.connectionsCheckingInterval, 2000);
+    assert.equal(server.requestTimeout, 10000);
+});
+
+test("an invalid reason is rejected before anything is stored (m30)", async () => {
+    await withServer(async ({ base, boardToken, senderToken }) => {
+        const res = await fetch(`${base}/frame?reason=reboot`, { headers: auth(boardToken) });
+        assert.equal(res.status, 400);
+        assert.equal((await res.json()).error.code, "invalid_reason");
+
+        const status = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
+        assert.equal(status.board, null); // recordFetch never ran
+    });
+});
+
+test("the data dir is chmod 0700 and written page/board files are 0600 (m32)", async () => {
+    await withServer(async ({ base, boardToken, senderToken, dataDir }) => {
+        assert.equal(fs.statSync(dataDir).mode & 0o777, 0o700);
+
+        await fetch(`${base}/pages/205`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "t" }),
+        });
+        assert.equal(fs.statSync(path.join(dataDir, "pages", "205.json")).mode & 0o777, 0o600);
+
+        await fetch(`${base}/frame`, { headers: auth(boardToken) });
+        assert.equal(fs.statSync(path.join(dataDir, "status.json")).mode & 0o777, 0o600);
+    });
+});
+
 test("two /frame calls inside 5s from the board token: the second is 429 and board state is unchanged", async () => {
     await withServer(async ({ base, boardToken, senderToken }) => {
         const first = await fetch(`${base}/frame?reason=timer&battery=4.0`, { headers: auth(boardToken) });
@@ -367,6 +401,27 @@ test("reserved and invalid page numbers 400", async () => {
         });
         assert.equal(reserved.status, 400);
         assert.equal((await reserved.json()).error.code, "reserved_page");
+    });
+});
+
+test("rejected writes (4xx) never count toward the write rate limit, only a 2xx does (m11)", async () => {
+    await withServer(async ({ base, senderToken }) => {
+        // WRITE_RATE_LIMIT.max is 10; 15 rejected attempts in a row must
+        // never trip it, since none of them actually wrote anything.
+        for (let i = 0; i < 15; i++) {
+            const res = await fetch(`${base}/pages/205`, {
+                method: "POST",
+                headers: { ...auth(senderToken), "Content-Type": "application/json" },
+                body: JSON.stringify({ title: "" }), // invalid: title is required
+            });
+            assert.equal(res.status, 400);
+        }
+        const ok = await fetch(`${base}/pages/205`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "valid" }),
+        });
+        assert.equal(ok.status, 201);
     });
 });
 

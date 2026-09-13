@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { regionsFor } from "../render/layout.js";
+import { ValidationError } from "./httpError.js";
 
 export const SCHEMA_VERSION = 1;
 export const DEFAULT_TTL_SECONDS = 86400;
@@ -54,7 +55,10 @@ export class Store {
         return path.join(this.#pagesDir, `${n}.image.bin`);
     }
 
-    get(n) {
+    // Reads and JSON-parses the record with no schema check — put() needs
+    // this to tell "unknown schema version, refuse to overwrite" (m2) apart
+    // from "missing/corrupt, fine to overwrite".
+    #readRawRecord(n) {
         let raw;
         try {
             raw = fs.readFileSync(this.#pagePath(n), "utf8");
@@ -63,13 +67,17 @@ export class Store {
             console.error(`videotext: skipping unreadable page ${n}: ${err.message}`);
             return null;
         }
-        let record;
         try {
-            record = JSON.parse(raw);
+            return JSON.parse(raw);
         } catch (err) {
             console.error(`videotext: skipping corrupt page ${n}: ${err.message}`);
             return null;
         }
+    }
+
+    get(n) {
+        const record = this.#readRawRecord(n);
+        if (!record) return null;
         if (record.v !== SCHEMA_VERSION) {
             console.error(`videotext: skipping page ${n}: unknown schema v=${record.v}`);
             return null;
@@ -103,9 +111,11 @@ export class Store {
         for (const n of this.listNumbers()) {
             const record = this.getLive(n, now);
             if (!record) continue;
-            // Strips colour tags for the P100 listing snippet only; the
-            // stored body (and the real page's own render) keep them.
-            const plainBody = (record.body ?? "").replace(/\{[a-z/]*\}/gi, "");
+            // Strips only the 7 known colour tags + {/} for the P100 listing
+            // snippet — an unknown {foo} tag renders literally on the real
+            // page, so stripping it here too would make the snippet lie
+            // about what the page actually shows (finding m3).
+            const plainBody = (record.body ?? "").replace(/\{(red|green|blue|yellow|orange|white|black|\/)\}/g, "");
             summaries.push({
                 number: record.number,
                 title: record.title,
@@ -120,29 +130,50 @@ export class Store {
 
     // Writes a full replacement record. `urgentSince` is set on a false->true
     // transition or on first creation, and left unchanged on a re-post of an
-    // already-urgent page (finding 5 / 2.3's on-disk schema).
+    // already-urgent page (finding 5 / 2.3's on-disk schema). Refuses to
+    // overwrite a record written by a schema version this code doesn't
+    // understand, rather than silently destroying whatever that newer
+    // schema's fields meant (finding m2) — a corrupt/unparseable file is a
+    // different case and is still fine to overwrite.
     put(n, fields, now) {
-        const existing = this.getLive(n, now);
+        const existingRaw = this.#readRawRecord(n);
+        if (existingRaw && existingRaw.v !== SCHEMA_VERSION) {
+            throw new ValidationError(
+                409,
+                "schema_conflict",
+                `page ${n} on disk has an unknown schema version (v=${existingRaw.v}); refusing to overwrite`,
+            );
+        }
+        const existing = existingRaw && existingRaw.expiresAt > now ? existingRaw : null;
         const urgent = !!fields.urgent;
         const urgentSince = urgent ? (existing?.urgent ? existing.urgentSince : now) : null;
         const record = { v: SCHEMA_VERSION, ...fields, number: n, urgent, urgentSince };
-        fs.writeFileSync(this.#pagePath(n), JSON.stringify(record, null, 2));
+        const pagePath = this.#pagePath(n);
+        fs.writeFileSync(pagePath, JSON.stringify(record, null, 2), { mode: 0o600 });
+        fs.chmodSync(pagePath, 0o600); // writeFileSync's mode is only honoured when the file didn't already exist
         return record;
     }
 
-    remove(n, now) {
-        const existed = !!this.getLive(n, now);
+    // 204/true whenever a file actually existed to delete — live, expired,
+    // or an unknown schema version — 404/false only when there was nothing
+    // there at all (finding m2: this used to delete-but-404 on anything
+    // that wasn't currently live).
+    remove(n) {
+        let existed = true;
         try {
             fs.unlinkSync(this.#pagePath(n));
-        } catch {
-            // already gone
+        } catch (err) {
+            if (err.code !== "ENOENT") throw err;
+            existed = false;
         }
         this.deleteImage(n);
         return existed;
     }
 
     putImage(n, buffer) {
-        fs.writeFileSync(this.#imagePath(n), buffer);
+        const imagePath = this.#imagePath(n);
+        fs.writeFileSync(imagePath, buffer, { mode: 0o600 });
+        fs.chmodSync(imagePath, 0o600);
     }
 
     getImage(n) {

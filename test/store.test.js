@@ -99,6 +99,17 @@ test("liveSummaries strips colour tags from the bodyStart snippet", () => {
     assert.equal(summary.bodyStart, "all tests passed extra");
 });
 
+test("liveSummaries only strips the 7 known colour tags and {/}, leaving unknown tags literal (m3)", () => {
+    const store = new Store(tmpDir());
+    const now = 1000;
+    store.put(205, { title: "t", body: "{green}ok{/} {foo}bar{/baz}", postedDisplay: "x", expiresAt: now + 1000 }, now);
+    const [summary] = store.liveSummaries(now);
+    // {green} and the first {/} are stripped; {foo} and {/baz} are not known
+    // tags, so they render literally on the real page and must stay in the
+    // snippet too, rather than the snippet silently disagreeing with it.
+    assert.equal(summary.bodyStart, "ok {foo}bar{/baz}");
+});
+
 test("formatDisplay renders 'Day D Mon HH:MM' including the day of week", () => {
     const ms = new Date(2026, 8, 12, 14, 5).getTime(); // Sat 12 Sep 2026, 14:05 local
     assert.equal(formatDisplay(ms), "Sat 12 Sep 14:05");
@@ -108,6 +119,32 @@ test("remove deletes a live page and reports whether one existed", () => {
     const store = new Store(tmpDir());
     const now = 1000;
     store.put(205, { title: "t", body: "", postedDisplay: "x", expiresAt: now + 1000 }, now);
-    assert.equal(store.remove(205, now), true);
-    assert.equal(store.remove(205, now), false);
+    assert.equal(store.remove(205), true);
+    assert.equal(store.remove(205), false);
+});
+
+test("remove reports true for a file that exists but is expired or an unknown schema version, not just live pages (m2)", () => {
+    const dir = tmpDir();
+    const store = new Store(dir);
+    const now = 1000;
+    store.put(205, { title: "t", body: "", postedDisplay: "x", expiresAt: now - 1 }, now); // already expired
+    assert.equal(store.remove(205), true);
+
+    fs.writeFileSync(path.join(dir, "pages", "206.json"), JSON.stringify({ v: 2, number: 206 }));
+    assert.equal(store.remove(206), true);
+
+    assert.equal(store.remove(207), false); // nothing there at all
+});
+
+test("put refuses to overwrite a record with an unknown schema version (m2)", () => {
+    const dir = tmpDir();
+    const store = new Store(dir);
+    fs.writeFileSync(path.join(dir, "pages", "205.json"), JSON.stringify({ v: 2, number: 205, expiresAt: Date.now() + 100000 }));
+    assert.throws(
+        () => store.put(205, { title: "t", body: "", postedDisplay: "x", expiresAt: Date.now() + 1000 }, Date.now()),
+        (e) => e.status === 409 && e.code === "schema_conflict",
+    );
+    // untouched: the v:2 record is still there
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, "pages", "205.json"), "utf8"));
+    assert.equal(raw.v, 2);
 });

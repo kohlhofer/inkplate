@@ -16,15 +16,19 @@ export async function token(args, cliConfig, relayConfig = loadConfig()) {
         let images = false;
         let urgent = false;
         let save = false;
+        let replace = false;
         for (let i = 0; i < flags.length; i++) {
             if (flags[i] === "--pages") pages = flags[++i];
             else if (flags[i] === "--images") images = true;
             else if (flags[i] === "--urgent") urgent = true;
             else if (flags[i] === "--save") save = true;
+            else if (flags[i] === "--replace") replace = true;
         }
-        if (!pages) throw new Error("usage: vt token add <name> --pages 200-299 [--images] [--urgent] [--save]");
+        if (!pages) {
+            throw new Error("usage: vt token add <name> --pages 200-299 [--images] [--urgent] [--save] [--replace]");
+        }
 
-        const raw = tokens.addSender(name, { pages, images, urgent });
+        const raw = tokens.addSender(name, { pages, images, urgent, replace });
         console.log(raw);
         console.error("this value will not be shown again");
         if (save) saveCliConfig({ token: raw, relay: cliConfig.relay }, cliConfig.configPath);

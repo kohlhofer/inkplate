@@ -40,7 +40,8 @@ export class Board {
 
     #save() {
         fs.mkdirSync(path.dirname(this.#path), { recursive: true, mode: 0o700 });
-        fs.writeFileSync(this.#path, JSON.stringify(this.#state, null, 2));
+        fs.writeFileSync(this.#path, JSON.stringify(this.#state, null, 2), { mode: 0o600 });
+        fs.chmodSync(this.#path, 0o600); // mode above is only honoured on creation (finding m32)
     }
 
     snapshot() {

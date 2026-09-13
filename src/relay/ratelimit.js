@@ -19,6 +19,23 @@ export class RateLimiter {
         return allowed;
     }
 
+    // Read-only version of check(): reports whether a request is currently
+    // allowed without recording a hit. Pairs with record() for callers that
+    // only want hits to count when the request actually succeeds (the write
+    // limiter, so a 400/403/404 doesn't eat into the quota — finding m11).
+    peek(key, now) {
+        const hits = (this.#hits.get(key) ?? []).filter((t) => now - t < this.#windowMs);
+        this.#hits.set(key, hits);
+        return hits.length < this.#max;
+    }
+
+    // Unconditionally records a hit; only meaningful after a prior peek().
+    record(key, now) {
+        const hits = (this.#hits.get(key) ?? []).filter((t) => now - t < this.#windowMs);
+        hits.push(now);
+        this.#hits.set(key, hits);
+    }
+
     retryAfterMs(key, now) {
         const hits = this.#hits.get(key) ?? [];
         if (hits.length === 0) return 0;

@@ -1,9 +1,50 @@
 import { ValidationError } from "./httpError.js";
 import { parseTtl } from "./store.js";
 
-export const PAGE_ROUTE = /^\/pages\/(\d{3})$/;
-export const PREVIEW_ROUTE = /^\/preview\/(\d{3})\.png$/;
+// Route matching (server.js's step (a), before auth) only needs to know
+// "this looks like a /pages or /preview path" — matching any single path
+// segment (never crossing a "/", which rules out traversal shapes) so a
+// malformed page number still reaches auth/field-validation and comes back
+// as 400 invalid_page instead of a bare 404 (finding M11).
+export const PAGE_ROUTE = /^\/pages\/([^/]+)$/;
+export const PREVIEW_ROUTE = /^\/preview\/([^/]+)$/;
+export const PAGE_NUMBER_PATTERN = /^\d{3}$/;
 export const TOKEN_NAME_PATTERN = /^[a-z0-9-]{1,24}$/;
+
+const VALID_REASONS = new Set(["boot", "timer", "button"]);
+
+// GET /frame's reason param, validated before board.recordFetch ever stores
+// it (finding m30).
+export function validateReason(raw) {
+    const reason = raw ?? "boot";
+    if (!VALID_REASONS.has(reason)) {
+        throw new ValidationError(400, "invalid_reason", "reason must be boot, timer, or button");
+    }
+    return reason;
+}
+
+// Shared by validatePagePost/validatePageRange: the outer route regex above
+// accepts any non-slash segment, so the 3-digit shape has to be checked here
+// instead — Number("abc") is NaN, and NaN fails every numeric comparison,
+// which would otherwise let a non-digit segment sail through unchecked.
+function parsePageDigits(rawDigits) {
+    if (!PAGE_NUMBER_PATTERN.test(String(rawDigits))) {
+        throw new ValidationError(400, "invalid_page", "page must be an integer 101-899");
+    }
+    return Number(rawDigits);
+}
+
+const PREVIEW_SEGMENT_PATTERN = /^(\d{3})\.png$/;
+
+// /preview/:n.png allows n=100 (always renders) in addition to 101-899.
+export function parsePreviewNumber(rawSegment) {
+    const match = PREVIEW_SEGMENT_PATTERN.exec(String(rawSegment));
+    const n = match ? Number(match[1]) : NaN;
+    if (!match || (n !== 100 && (n < 101 || n > 899))) {
+        throw new ValidationError(400, "invalid_page", "page must be 100 or an integer 101-899, e.g. /preview/205.png");
+    }
+    return n;
+}
 
 const C0_ALL = /[\x00-\x1f\x7f-\x9f]/g;
 const C0_NO_NEWLINE = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/g;
@@ -25,8 +66,10 @@ export function validateTokenName(name) {
 const MAX_BODY_TEXT_BYTES = 8192;
 const MAX_CHART_VALUES = 600;
 const VALID_LAYOUTS = new Set(["text", "image-left", "image-top", "image"]);
+const IMAGE_LAYOUTS = new Set(["image", "image-left", "image-top"]);
 const VALID_IMAGE_STYLES = new Set(["dither", "blocks"]);
 const VALID_CHART_TYPES = new Set(["spark", "bars"]);
+const VALID_BODY_KEYS = ["title", "body", "ttl", "urgent", "layout", "image", "chart"];
 
 function isFiniteNumber(v) {
     return typeof v === "number" && Number.isFinite(v);
@@ -57,7 +100,7 @@ export function validateFrameTelemetry({ battery, rssi, fw }) {
 // request body schema (400), all via one call per the plan's ordering (2.2,
 // step g runs after the body is parsed).
 export function validatePagePost(sender, rawDigits, body) {
-    const n = Number(rawDigits);
+    const n = parsePageDigits(rawDigits);
     if (n === 100) throw new ValidationError(400, "reserved_page", "100 is the generated front page; use 101-899");
     if (n < 101 || n > 899) throw new ValidationError(400, "invalid_page", "page must be an integer 101-899");
     if (n < sender.range.min || n > sender.range.max) {
@@ -70,6 +113,12 @@ export function validatePagePost(sender, rawDigits, body) {
 
     if (typeof body !== "object" || body === null) {
         throw new ValidationError(400, "invalid_body", "body must be a JSON object");
+    }
+
+    for (const key of Object.keys(body)) {
+        if (!VALID_BODY_KEYS.includes(key)) {
+            throw new ValidationError(400, "invalid_body", `unknown field '${key}'; valid fields are ${VALID_BODY_KEYS.join(", ")}`);
+        }
     }
 
     const title = sanitizeText(body.title ?? "", { allowNewlines: false }).trim();
@@ -90,7 +139,13 @@ export function validatePagePost(sender, rawDigits, body) {
         throw new ValidationError(400, "invalid_ttl", "ttl must be seconds or e.g. '2h', '90m', '1d', max 7d");
     }
 
-    const urgent = !!body.urgent;
+    let urgent = false;
+    if (body.urgent !== undefined) {
+        if (typeof body.urgent !== "boolean") {
+            throw new ValidationError(400, "invalid_body", "urgent must be a boolean");
+        }
+        urgent = body.urgent;
+    }
     if (urgent && !sender.urgent) {
         throw new ValidationError(403, "forbidden_urgent", `token '${sender.name}' may not post urgent pages`);
     }
@@ -99,6 +154,9 @@ export function validatePagePost(sender, rawDigits, body) {
     if (body.image !== undefined) {
         if (!sender.images) {
             throw new ValidationError(403, "forbidden_images", `token '${sender.name}' may not post images`);
+        }
+        if (!IMAGE_LAYOUTS.has(layout)) {
+            throw new ValidationError(400, "invalid_body", "image requires layout image, image-left or image-top");
         }
         if (typeof body.image !== "object" || body.image === null) {
             throw new ValidationError(400, "invalid_body", "invalid image");
@@ -135,7 +193,7 @@ export function validatePagePost(sender, rawDigits, body) {
 }
 
 export function validatePageRange(sender, rawDigits) {
-    const n = Number(rawDigits);
+    const n = parsePageDigits(rawDigits);
     if (n === 100) throw new ValidationError(400, "reserved_page", "100 is the generated front page; use 101-899");
     if (n < 101 || n > 899) throw new ValidationError(400, "invalid_page", "page must be an integer 101-899");
     if (n < sender.range.min || n > sender.range.max) {

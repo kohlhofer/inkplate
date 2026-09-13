@@ -88,3 +88,56 @@ test("revoking a sender removes its access", () => {
     assert.equal(store.revokeSender("hooks"), true);
     assert.equal(store.authenticate(token), null);
 });
+
+test("adding a token with an existing name fails unless --replace (m9)", () => {
+    const store = new TokenStore(tmpDir());
+    const first = store.addSender("hooks", { pages: "200-299" });
+    assert.throws(() => store.addSender("hooks", { pages: "300-399" }), /already exists/);
+    assert.ok(store.authenticate(first)); // untouched by the failed attempt
+
+    const second = store.addSender("hooks", { pages: "300-399", replace: true });
+    assert.equal(store.authenticate(first), null);
+    const sender = store.authenticate(second);
+    assert.deepEqual(sender.range, { min: 300, max: 399 });
+});
+
+test("a corrupt tokens file causes add/revoke/rotate/list to throw and leave the file untouched (M5)", () => {
+    const dir = tmpDir();
+    const store = new TokenStore(dir);
+    store.addSender("hooks", { pages: "200-299" });
+
+    fs.writeFileSync(path.join(dir, "tokens.json"), "{not valid json");
+
+    assert.throws(() => store.addSender("new", { pages: "400-499" }), /corrupt/);
+    assert.throws(() => store.revokeSender("hooks"), /corrupt/);
+    assert.throws(() => store.rotateBoardToken(), /corrupt/);
+    assert.throws(() => store.listSenders(), /corrupt/);
+
+    assert.equal(fs.readFileSync(path.join(dir, "tokens.json"), "utf8"), "{not valid json");
+});
+
+test("a malformed (but valid-JSON) tokens file fails closed too (m26): bad senders shape, not just bad JSON", () => {
+    const dir = tmpDir();
+    const store = new TokenStore(dir);
+    fs.writeFileSync(path.join(dir, "tokens.json"), JSON.stringify({ board: null, senders: { hooks: { pages: "not-a-range" } } }));
+    assert.equal(store.authenticate("anything"), null);
+    assert.throws(() => store.listSenders(), /corrupt/);
+});
+
+test("a persistently corrupt tokens file is only re-parsed (and logged) once per mtime, not per request (m27)", () => {
+    const dir = tmpDir();
+    const store = new TokenStore(dir);
+    fs.writeFileSync(path.join(dir, "tokens.json"), "{not valid json");
+
+    const lines = [];
+    const original = console.error;
+    console.error = (...args) => lines.push(args.join(" "));
+    try {
+        store.authenticate("a");
+        store.authenticate("b");
+        store.authenticate("c");
+    } finally {
+        console.error = original;
+    }
+    assert.equal(lines.filter((l) => l.includes("tokens.json")).length, 1);
+});
