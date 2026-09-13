@@ -25,7 +25,9 @@ Each sketch is a folder under `sketches/` whose `.ino` matches the folder name.
   `/dev/cu.usbserial-*` but the ESP32 never answers ("No serial data received").
 - The CH340 link corrupts at 921600 baud. Uploads at the board default 460800 are fine;
   long `esptool read-flash` runs need 115200.
-- A full refresh takes ~12 s and there is no partial update. Don't refresh in a tight loop.
+- There is no partial update. `display.display()` measured 29.4 s on 2026-09-13 when the board
+  wakes from deep sleep to draw (videotext's timing log), so a redraw wake is about 32 s
+  awake. Don't refresh in a tight loop.
 - `display.touchpad.read()` panics (null pointer): InkplateLibrary 11.1.5's 6COLOR driver never calls
   `touchpad.begin()`. Current 6COLOR boards likely have no touchpads anyway. The library's
   `Inkplate6COLOR_Read_Touchpads` example crashes the same way.
@@ -63,7 +65,7 @@ drawn procedurally so they tile.
    `BOARD_TOKEN` (from step 2, never a sender token) and `POLL_SECONDS` (60 on wall
    power, 900 on battery). A DHCP reservation for the Mac keeps `RELAY_HOST` valid.
 5. Switch the board on and `make upload SKETCH=sketches/videotext` (a bare `make upload`
-   builds `hello`). The first frame appears about 15 s later: "Nothing posted" on an
+   builds `hello`). The first frame appears about 35 s later: "Nothing posted" on an
    empty relay means everything works.
 6. `node bin/vt.js send 201 "Hello" --body "{green}it works{/}"` and
    `node bin/vt.js status` to see what the board last fetched.
@@ -77,7 +79,7 @@ The relay can't answer while the Mac sleeps or is off. The board then backs off 
   lowest-numbered live page. The index (P100) is the default only when nothing is live.
 - **The button** steps through the live pages in order, then the index, then back to the
   first page. Someone who pressed it in the last 10 minutes stays on their page; after
-  that the wall returns to the first page. Presses while the board is drawing (about 15 s)
+  that the wall returns to the first page. Presses while the board is drawing (about 30 s)
   are not registered.
 - **Pages 101-899**: header (number, sender token name, posted date), double-height title,
   body, footer (position, next page, expiry).
@@ -85,7 +87,7 @@ The relay can't answer while the Mac sleeps or is off. The board then backs off 
   row per live page (number, title, posted day and time). With no pages it says "Nothing
   posted" over a stripe of all seven panel colours.
 - **Updates**: the board polls every `POLL_SECONDS`. The relay only lets a timer wake
-  redraw once every 3 minutes (a redraw is a 12 s full-panel flash), so a change to the
+  redraw once every 3 minutes (a redraw is a 30 s full-panel flash), so a change to the
   first page shows within about 3 minutes on wall power. An urgent page skips that wait:
   the wall shows that page itself at the next poll, at most once per 10 minutes. Pick low
   page numbers for what should be on the wall by default.
