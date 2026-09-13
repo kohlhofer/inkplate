@@ -65,11 +65,13 @@ function packWords(words, columns) {
             currentRow = [...word];
             currentWidth = word.length;
         } else {
-            // The inter-word space is always untagged (finding m16): it used
-            // to take the *next* word's tag, which coloured one cell of
-            // padding on the left of a tagged word but not the right,
-            // reading as lopsided band padding.
-            if (currentWidth > 0) currentRow.push({ ch: " ", tag: null });
+            // The inter-word space is untagged at a tag boundary, so a band gets
+            // even padding on both sides, but keeps the tag when both words
+            // share it, so "{yellow}Partly sunny{/}" is one band, not two.
+            if (currentWidth > 0) {
+                const prevTag = currentRow[currentRow.length - 1].tag;
+                currentRow.push({ ch: " ", tag: prevTag === word[0].tag ? prevTag : null });
+            }
             currentRow.push(...word);
             currentWidth = neededWidth;
         }

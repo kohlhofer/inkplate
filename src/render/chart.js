@@ -44,10 +44,13 @@ export const CHART_BLANK_SEPARATOR_ROWS = 1;
 // itself — `naturalBodyRows` is however many rows the body would need if it
 // had the *whole* region, which only the caller (frame.js/lint.js, via
 // wrap.js) can compute, since that depends on the column budget.
+// When there is body text, one row is also left free under it so the last body
+// line doesn't sit directly on the footer.
 export function splitChartRows({ hasLabel, naturalBodyRows, regionRows }) {
     const labelRows = hasLabel ? 1 : 0;
     const available = regionRows - labelRows;
-    const chartRows = Math.max(MIN_CHART_ROWS, available - CHART_BLANK_SEPARATOR_ROWS - naturalBodyRows);
+    const trailingBlank = naturalBodyRows > 0 ? 1 : 0;
+    const chartRows = Math.max(MIN_CHART_ROWS, available - CHART_BLANK_SEPARATOR_ROWS - naturalBodyRows - trailingBlank);
     const bodyRows = Math.max(0, available - CHART_BLANK_SEPARATOR_ROWS - chartRows);
     return { labelRows, chartRows, bodyRows };
 }

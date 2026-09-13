@@ -95,6 +95,14 @@ test("bars charts reserve no label rows: the max-value bar reaches the top of th
     assert.equal(fb[rect.y * PANEL_WIDTH + 0], theme.accent);
 });
 
+test("a chart page keeps a blank row between the last body line and the footer", async () => {
+    const { splitChartRows } = await import("../src/render/chart.js");
+    const { labelRows, chartRows, bodyRows } = splitChartRows({ hasLabel: true, naturalBodyRows: 5, regionRows: 14 });
+    // label + chart + separator + 5 body rows + 1 free row = 14
+    assert.equal(labelRows + chartRows + 1 + 5 + 1, 14);
+    assert.ok(bodyRows >= 5);
+});
+
 test("empty values draws nothing and does not throw", () => {
     const fb = createFramebuffer();
     assert.doesNotThrow(() => drawChart(fb, { x: 0, y: 0, w: 10, h: 10 }, { type: "spark", values: [] }, theme));

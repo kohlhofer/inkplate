@@ -31,7 +31,14 @@ test("tag spans cost 0 columns: colour changes don't shrink the row budget", () 
     assert.equal(rowText(rows[0]), "hi there");
 });
 
-test("the inter-word space is always untagged, never taking the next word's colour (m16)", () => {
+test("a space between two words of the same tag keeps the tag, so the band is continuous", () => {
+    const { lines } = parse("{yellow}Partly sunny{/} high 90");
+    const { rows } = wrap(lines, 30, 10);
+    assert.deepEqual(rows[0][0], { text: "Partly sunny", tag: "yellow" });
+    assert.equal(rows[0][1].tag, null);
+});
+
+test("the space at a tag boundary is untagged, never taking the next word's colour (m16)", () => {
     const { lines } = parse("before {red}FAILED{/} after");
     const { rows } = wrap(lines, 30, 10);
     const flat = rows[0].flatMap((span) => [...span.text].map(() => span.tag));
