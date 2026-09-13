@@ -91,23 +91,12 @@ test("liveSummaries lists only live pages, ascending", () => {
     assert.deepEqual(numbers, [250, 300]);
 });
 
-test("liveSummaries strips colour tags from the bodyStart snippet", () => {
+test("liveSummaries carries no body snippet — only number/title/postedDisplay/urgent(Since) (M21)", () => {
     const store = new Store(tmpDir());
     const now = 1000;
     store.put(205, { title: "t", body: "{green}all tests passed{/} extra", postedDisplay: "x", expiresAt: now + 1000 }, now);
     const [summary] = store.liveSummaries(now);
-    assert.equal(summary.bodyStart, "all tests passed extra");
-});
-
-test("liveSummaries only strips the 7 known colour tags and {/}, leaving unknown tags literal (m3)", () => {
-    const store = new Store(tmpDir());
-    const now = 1000;
-    store.put(205, { title: "t", body: "{green}ok{/} {foo}bar{/baz}", postedDisplay: "x", expiresAt: now + 1000 }, now);
-    const [summary] = store.liveSummaries(now);
-    // {green} and the first {/} are stripped; {foo} and {/baz} are not known
-    // tags, so they render literally on the real page and must stay in the
-    // snippet too, rather than the snippet silently disagreeing with it.
-    assert.equal(summary.bodyStart, "ok {foo}bar{/baz}");
+    assert.deepEqual(Object.keys(summary).sort(), ["number", "postedDisplay", "title", "urgent", "urgentSince"]);
 });
 
 test("formatDisplay renders 'Day D Mon HH:MM' including the day of week", () => {

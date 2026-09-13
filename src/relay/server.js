@@ -156,7 +156,7 @@ export function createServer(config = loadConfig()) {
         const resolvedNumber = resolvePage({ reason, page: requestedPage }, liveSummaries, boardSnapshot, now);
         const snapshot =
             resolvedNumber === 100 ? { liveSummaries } : { page: loadRenderPage(resolvedNumber, now), liveSummaries };
-        const { bytes, etag } = renderFrame(resolvedNumber, snapshot, boardSnapshot, theme);
+        const { bytes, etag } = renderFrame(resolvedNumber, snapshot, boardSnapshot, theme, now);
 
         // An honest If-None-Match match is not a redraw: it touches no board
         // state at all (finding B2/M2), unlike the coalescing short-circuit
@@ -205,7 +205,7 @@ export function createServer(config = loadConfig()) {
 
         const fields = validatePagePost(sender, digits, parsed);
         const now = Date.now();
-        const lintResult = lint({ title: fields.title, body: fields.body, layout: fields.layout });
+        const lintResult = lint({ title: fields.title, body: fields.body, layout: fields.layout, chart: fields.chart });
 
         let imageMeta = null;
         if (fields.image) {
@@ -305,7 +305,7 @@ export function createServer(config = loadConfig()) {
             }
             snapshot = { page, liveSummaries };
         }
-        const { indices } = renderFrame(n, snapshot, board.snapshot(), theme);
+        const { indices } = renderFrame(n, snapshot, board.snapshot(), theme, now);
         const png = buildPreviewPng(indices);
         res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
         res.end(png);

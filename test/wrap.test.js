@@ -31,6 +31,18 @@ test("tag spans cost 0 columns: colour changes don't shrink the row budget", () 
     assert.equal(rowText(rows[0]), "hi there");
 });
 
+test("the inter-word space is always untagged, never taking the next word's colour (m16)", () => {
+    const { lines } = parse("before {red}FAILED{/} after");
+    const { rows } = wrap(lines, 30, 10);
+    const flat = rows[0].flatMap((span) => [...span.text].map(() => span.tag));
+    const text = rowText(rows[0]);
+    // Both spaces (around FAILED) must be untagged, regardless of which
+    // word sits on either side of them.
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] === " ") assert.equal(flat[i], null, `space at ${i} should be untagged`);
+    }
+});
+
 test("fenced lines are not wrapped, only cropped, and warn once per overflowing line", () => {
     const { lines } = parse("```\n0123456789ABCDEF\nshort\n```");
     const { rows, warnings } = wrap(lines, 10, 10);

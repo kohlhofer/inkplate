@@ -79,6 +79,36 @@ test("quadrant upper-left (U+2598) fills only that quadrant", () => {
     assert.equal(pixel(fb, 11, 23), 0);
 });
 
+test("25%/75% shades use a 2x2 ordered pattern, not diagonal hatching (m21)", () => {
+    const light = createFramebuffer(); // U+2591 light shade, 25%
+    const dark = createFramebuffer(); // U+2593 dark shade, 75%
+    drawProcedural(light, 0, 0, 0x2591, 9);
+    drawProcedural(dark, 0, 0, 0x2593, 9);
+
+    const count = (fb) => {
+        let n = 0;
+        for (const v of fb) if (v === 9) n++;
+        return n;
+    };
+    assert.equal(count(light), 12 * 24 * 0.25);
+    assert.equal(count(dark), 12 * 24 * 0.75);
+
+    // A 2x2 ordered tile repeats every 2px in both axes: (0,0) and (2,2)
+    // must match, and so must (0,1) and (2,1) — a diagonal (x+y)%4 pattern
+    // would not have this property.
+    assert.equal(pixel(light, 0, 0), pixel(light, 2, 2));
+    assert.equal(pixel(light, 0, 1), pixel(light, 2, 1));
+});
+
+test("50% shade stays a plain checkerboard (m21)", () => {
+    const fb = createFramebuffer();
+    drawProcedural(fb, 0, 0, 0x2592, 9);
+    assert.equal(pixel(fb, 0, 0), 9);
+    assert.equal(pixel(fb, 1, 0), 0);
+    assert.equal(pixel(fb, 0, 1), 0);
+    assert.equal(pixel(fb, 1, 1), 9);
+});
+
 test("out-of-scope codepoints (e.g. a plain letter) are not handled", () => {
     const fb = createFramebuffer();
     const drew = drawProcedural(fb, 0, 0, "A".codePointAt(0), 1);

@@ -65,7 +65,11 @@ function packWords(words, columns) {
             currentRow = [...word];
             currentWidth = word.length;
         } else {
-            if (currentWidth > 0) currentRow.push({ ch: " ", tag: word[0].tag });
+            // The inter-word space is always untagged (finding m16): it used
+            // to take the *next* word's tag, which coloured one cell of
+            // padding on the left of a tagged word but not the right,
+            // reading as lopsided band padding.
+            if (currentWidth > 0) currentRow.push({ ch: " ", tag: null });
             currentRow.push(...word);
             currentWidth = neededWidth;
         }

@@ -105,21 +105,17 @@ export class Store {
         return numbers.sort((a, b) => a - b);
     }
 
-    // Ascending [{number, title, bodyStart, postedDisplay, urgent, urgentSince}].
+    // Ascending [{number, title, postedDisplay, urgent, urgentSince}]. No
+    // body snippet (round-2 fix, M21): the title is what appears on P100,
+    // and a truncated snippet only ever bought confusable, mid-word cruft.
     liveSummaries(now) {
         const summaries = [];
         for (const n of this.listNumbers()) {
             const record = this.getLive(n, now);
             if (!record) continue;
-            // Strips only the 7 known colour tags + {/} for the P100 listing
-            // snippet — an unknown {foo} tag renders literally on the real
-            // page, so stripping it here too would make the snippet lie
-            // about what the page actually shows (finding m3).
-            const plainBody = (record.body ?? "").replace(/\{(red|green|blue|yellow|orange|white|black|\/)\}/g, "");
             summaries.push({
                 number: record.number,
                 title: record.title,
-                bodyStart: plainBody.split("\n")[0].slice(0, 40),
                 postedDisplay: record.postedDisplay,
                 urgent: !!record.urgent,
                 urgentSince: record.urgentSince ?? null,

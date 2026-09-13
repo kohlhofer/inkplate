@@ -20,25 +20,36 @@ const board = (overrides) => ({
     ...overrides,
 });
 
+const NOW = 1_757_678_700_000; // fixed instant, so the header's date is deterministic across runs
+
 test("renderFrame's front page output is exactly one frame's worth of bytes", () => {
-    const { bytes } = renderFrame(100, { liveSummaries: [] }, board({}), THEMES.dark);
+    const { bytes } = renderFrame(100, { liveSummaries: [] }, board({}), THEMES.dark, NOW);
     assert.equal(bytes.length, FRAME_BYTES);
 });
 
 test("renderFrame is deterministic: identical inputs give identical bytes and etag", () => {
     const snapshot = { liveSummaries: [] };
-    const a = renderFrame(100, snapshot, board({}), THEMES.dark);
-    const b = renderFrame(100, snapshot, board({}), THEMES.dark);
+    const a = renderFrame(100, snapshot, board({}), THEMES.dark, NOW);
+    const b = renderFrame(100, snapshot, board({}), THEMES.dark, NOW);
     assert.deepEqual(a.bytes, b.bytes);
     assert.equal(a.etag, b.etag);
 });
 
 test("a stored batteryLow=true changes the front page's rendered bytes and etag", () => {
     const snapshot = { liveSummaries: [] };
-    const normal = renderFrame(100, snapshot, board({ batteryLow: false }), THEMES.dark);
-    const low = renderFrame(100, snapshot, board({ batteryLow: true }), THEMES.dark);
+    const normal = renderFrame(100, snapshot, board({ batteryLow: false }), THEMES.dark, NOW);
+    const low = renderFrame(100, snapshot, board({ batteryLow: true }), THEMES.dark, NOW);
     assert.notEqual(normal.etag, low.etag);
     assert.notDeepEqual(normal.bytes, low.bytes);
+});
+
+test("P100's rendered bytes change once the date changes, and only then (determinism note, M8)", () => {
+    const snapshot = { liveSummaries: [] };
+    const sameDay = renderFrame(100, snapshot, board({}), THEMES.dark, NOW + 60 * 60 * 1000); // +1h, same day
+    const nextDay = renderFrame(100, snapshot, board({}), THEMES.dark, NOW + 24 * 60 * 60 * 1000); // +1 day
+    const base = renderFrame(100, snapshot, board({}), THEMES.dark, NOW);
+    assert.equal(base.etag, sameDay.etag);
+    assert.notEqual(base.etag, nextDay.etag);
 });
 
 test("renderFrame draws a real text-layout page without crashing and at full length", () => {
@@ -56,6 +67,138 @@ test("renderFrame draws a real text-layout page without crashing and at full len
     const { bytes, etag } = renderFrame(205, { page, liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark);
     assert.equal(bytes.length, FRAME_BYTES);
     assert.equal(typeof etag, "string");
+});
+
+test("real-page text never touches column 0 or column 49 (M19 inset)", () => {
+    const page = {
+        number: 205,
+        sender: "hooks",
+        postedDisplay: "Sat 12 Sep 14:05",
+        expiresDisplay: "Sun 13 Sep 09:00",
+        title: "x".repeat(48),
+        body: "y".repeat(48),
+        layout: "text",
+        image: null,
+        chart: null,
+    };
+    const { indices } = renderFrame(205, { page, liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark, NOW);
+    const bg = THEMES.dark.background;
+    for (let y = 0; y < 448; y++) {
+        assert.equal(indices[y * 600 + 0], bg, `col 0 at y=${y} should be untouched background`);
+        assert.equal(indices[y * 600 + 599], bg, `col 49 at y=${y} should be untouched background`);
+    }
+});
+
+test("the header's page number is drawn in the theme's accent colour", () => {
+    const page = {
+        number: 205,
+        sender: "hooks",
+        postedDisplay: "Sat 12 Sep 14:05",
+        expiresDisplay: "Sun 13 Sep 09:00",
+        title: "t",
+        body: "",
+        layout: "text",
+        image: null,
+        chart: null,
+    };
+    const { indices } = renderFrame(205, { page, liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark, NOW);
+    let accentInHeader = false;
+    for (let y = 8; y < 32; y++) {
+        for (let x = 12; x < 12 + 3 * 12; x++) {
+            if (indices[y * 600 + x] === THEMES.dark.accent) accentInHeader = true;
+        }
+    }
+    assert.ok(accentInHeader);
+});
+
+test("the footer says 'next » 100 front page' on the last live page", () => {
+    const page = {
+        number: 300,
+        sender: "hooks",
+        postedDisplay: "Sat 12 Sep 14:05",
+        expiresDisplay: "Sun 13 Sep 09:00",
+        title: "t",
+        body: "",
+        layout: "text",
+        image: null,
+        chart: null,
+    };
+    const liveSummaries = [{ number: 205, title: "a" }, { number: 300, title: "b" }];
+    const { indices: withMore } = renderFrame(
+        205,
+        { page: { ...page, number: 205 }, liveSummaries },
+        board({}),
+        THEMES.dark,
+        NOW,
+    );
+    const { indices: withoutMore } = renderFrame(300, { page, liveSummaries }, board({}), THEMES.dark, NOW);
+    // The two footers differ (one names the next real page, the other wraps
+    // to the front page) — a coarse but effective proxy for "renders
+    // correctly for both the middle and the last live page" without
+    // depending on exact glyph positions.
+    let footerDiffers = false;
+    for (let y = 416; y < 440; y++) {
+        for (let x = 0; x < 600; x++) {
+            if (withMore[y * 600 + x] !== withoutMore[y * 600 + x]) footerDiffers = true;
+        }
+    }
+    assert.ok(footerDiffers);
+});
+
+test("a colour band gets one cell of padding on both sides when bordered by plain text (m16)", () => {
+    const page = {
+        number: 205,
+        sender: "hooks",
+        postedDisplay: "Sat 12 Sep 14:05",
+        expiresDisplay: "Sun 13 Sep 09:00",
+        title: "t",
+        body: "before {red}FAILED{/} after",
+        layout: "text",
+        image: null,
+        chart: null,
+    };
+    const { indices } = renderFrame(205, { page, liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark, NOW);
+    const bodyY = 8 + 3 * 24; // BODY_ROW_START's first row
+    let run = 0;
+    let longestRun = 0;
+    for (let x = 0; x < 600; x++) {
+        if (indices[bodyY * 600 + x] === THEMES.dark.tags.red.bg) {
+            run++;
+            longestRun = Math.max(longestRun, run);
+        } else {
+            run = 0;
+        }
+    }
+    // "FAILED" is 6 cells (72px); with 1 cell (12px) of padding on each
+    // side bordering plain text, the band should be 8 cells (96px) wide.
+    assert.equal(longestRun, 8 * 12);
+});
+
+test("image-left's text-region background clear doesn't wipe out the image drawn to its left", () => {
+    const width = 288;
+    const height = 336;
+    const pixels = new Uint8Array(width * height).fill(4); // solid red
+    const page = {
+        number: 205,
+        sender: "hooks",
+        postedDisplay: "Sat 12 Sep 14:05",
+        expiresDisplay: "Sun 13 Sep 09:00",
+        title: "t",
+        body: "some text",
+        layout: "image-left",
+        image: { style: "dither", width, height, pixels },
+        chart: null,
+    };
+    const { indices } = renderFrame(205, { page, liveSummaries: [{ number: 205 }] }, board({}), THEMES.dark, NOW);
+    // Somewhere inside the image's own region (rows 3-16, cols 0-23) the
+    // red fill must survive the text region's background clear.
+    let sawRed = false;
+    for (let y = 80; y < 80 + height; y++) {
+        for (let x = 0; x < width; x++) {
+            if (indices[y * 600 + x] === 4) sawRed = true;
+        }
+    }
+    assert.ok(sawRed);
 });
 
 test("renderFrame draws a chart on a text-layout page without crashing", () => {

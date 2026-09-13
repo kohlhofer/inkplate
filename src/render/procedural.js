@@ -139,11 +139,25 @@ function blockRects(codepoint) {
 }
 
 // Approximate stipple, not the real Unicode shade bitmap — deterministic and
-// good enough for a teletext-style mosaic at this cell size.
+// good enough for a teletext-style mosaic at this cell size. 25%/75% use a
+// 2x2 ordered (Bayer) tile so the result reads as an even dot grid; the old
+// (x+y)%4 test produced visible diagonal hatching instead (finding m21). 50%
+// stays the plain checkerboard, which already tiles evenly.
+const BAYER_2X2 = [
+    [0, 2],
+    [3, 1],
+];
+
 function drawShade(fb, originX, originY, density, fgIndex) {
     for (let y = 0; y < CELL_HEIGHT; y++) {
         for (let x = 0; x < CELL_WIDTH; x++) {
-            const on = density === 0.25 ? (x + y) % 4 === 0 : density === 0.5 ? (x + y) % 2 === 0 : (x + y) % 4 !== 0;
+            let on;
+            if (density === 0.5) {
+                on = (x + y) % 2 === 0;
+            } else {
+                const threshold = density === 0.25 ? 1 : 3; // 1-of-4 vs 3-of-4 cells lit
+                on = BAYER_2X2[y % 2][x % 2] < threshold;
+            }
             if (on) setPixel(fb, originX + x, originY + y, fgIndex);
         }
     }

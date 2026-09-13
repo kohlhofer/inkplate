@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { lint, TITLE_MAX } from "../src/render/lint.js";
 
-test("a too-long title produces exactly one 'title cut' warning and is cut to 50 chars", () => {
+test("a too-long title produces exactly one 'title cut' warning and is cut to TITLE_MAX (48, M19)", () => {
     const title = "x".repeat(80);
     const { title: cutTitle, warnings } = lint({ title, body: "", layout: "text" });
     assert.equal(cutTitle.length, TITLE_MAX);
@@ -40,4 +40,16 @@ test("image layout with extra body lines warns that they're dropped", () => {
 test("image layout with a single short caption line has no warning", () => {
     const { warnings } = lint({ title: "t", body: "caption", layout: "image" });
     assert.deepEqual(warnings, []);
+});
+
+test("a chart claims rows before the body does, so truncation warnings fire where they wouldn't without a chart (m1)", () => {
+    const body = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
+    const withoutChart = lint({ title: "t", body, layout: "text" });
+    assert.deepEqual(
+        withoutChart.warnings.filter((w) => /truncated/.test(w)),
+        [],
+    );
+
+    const withChart = lint({ title: "t", body, layout: "text", chart: { type: "spark", values: [1, 2, 3] } });
+    assert.ok(withChart.warnings.some((w) => /lines truncated/.test(w)));
 });
