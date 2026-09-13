@@ -37,21 +37,21 @@ port:
 restore-backup:
 	esptool --port $(PORT) --baud 115200 write-flash 0 $(BACKUP)
 
-# Not installed automatically. The relay dies when the laptop sleeps; this
-# LaunchAgent (RunAtLoad + KeepAlive) is the only keep-running mechanism —
-# `vt serve` in a foreground terminal is otherwise the only way to run it.
-# KeepAlive means a second, separately-started `vt serve` already holding
-# RELAY_PORT will make this agent crash-loop forever (bind EADDRINUSE, exit,
-# restart, repeat) — stop any foreground `vt serve` before installing this.
+# Runs the relay as a login service (RunAtLoad + KeepAlive) from this checkout,
+# logging to relay.log. KeepAlive would crash-loop against another relay
+# already holding the port, so installing refuses while the port is taken, and
+# the check afterwards asks launchd whether its own process is running rather
+# than whether anything answers on the port.
 relay-install:
 	@test -n "$(NODE_BIN)" || (echo "node not found on PATH" && exit 1)
+	@! lsof -nP -iTCP:$(RELAY_PORT) -sTCP:LISTEN >/dev/null || \
+		(echo "port $(RELAY_PORT) is already in use; stop the other relay (pkill -f 'vt.js serve') and retry" && exit 1)
 	sed -e 's#__NODE_PATH__#$(NODE_BIN)#' -e 's#__BIN_PATH__#$(REPO_DIR)/bin/vt.js#' -e 's#__REPO_PATH__#$(REPO_DIR)#' \
 		relay-install.plist.template > $(PLIST)
 	launchctl load $(PLIST)
-	@echo "installed and loaded $(PLIST)"
-	@sleep 1
-	@curl -sf http://127.0.0.1:$(RELAY_PORT)/healthz >/dev/null && echo "relay is healthy on port $(RELAY_PORT)" || \
-		echo "warning: /healthz did not respond on port $(RELAY_PORT) within 1s -- if a separately running 'vt serve' already holds that port, this LaunchAgent will crash-loop retrying it; check 'launchctl list | grep $(PLIST_LABEL)' and 'cat relay.log'"
+	@sleep 2
+	@launchctl list $(PLIST_LABEL) 2>/dev/null | grep -q '"PID"' && echo "relay service running from $(REPO_DIR)" || \
+		(echo "relay service is not running; see $(REPO_DIR)/relay.log" && exit 1)
 
 relay-uninstall:
 	-launchctl unload $(PLIST) 2>/dev/null
