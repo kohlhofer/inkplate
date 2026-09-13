@@ -69,7 +69,7 @@ const VALID_LAYOUTS = new Set(["text", "image-left", "image-top", "image"]);
 const IMAGE_LAYOUTS = new Set(["image", "image-left", "image-top"]);
 const VALID_IMAGE_STYLES = new Set(["dither", "blocks"]);
 const VALID_CHART_TYPES = new Set(["spark", "bars"]);
-const VALID_BODY_KEYS = ["title", "body", "ttl", "urgent", "layout", "image", "chart"];
+const VALID_BODY_KEYS = ["title", "body", "ttl", "urgent", "layout", "image", "chart", "replace"];
 
 function isFiniteNumber(v) {
     return typeof v === "number" && Number.isFinite(v);
@@ -189,7 +189,12 @@ export function validatePagePost(sender, rawDigits, body) {
         };
     }
 
-    return { number: n, title, body: bodyText, layout, urgent, ttlSeconds, image, chart };
+    if (body.replace !== undefined && typeof body.replace !== "boolean") {
+        throw new ValidationError(400, "invalid_body", "replace must be a boolean");
+    }
+    const replace = body.replace === true;
+
+    return { number: n, title, body: bodyText, layout, urgent, ttlSeconds, image, chart, replace };
 }
 
 export function validatePageRange(sender, rawDigits) {

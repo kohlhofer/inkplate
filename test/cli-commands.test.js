@@ -79,8 +79,14 @@ test("send prints the documented success line, then each warning on its own line
             restore();
         }
         assert.equal(out.length, 1);
-        assert.match(out[0], /^page 205 live until .+ · listed on P100 at the next poll · vt preview 205$/);
+        assert.match(out[0], /^page 205 live until .+ · first page: on the wall within about 3 minutes · vt preview 205$/);
         assert.ok(err.some((l) => l === "warning: title cut"));
+    });
+});
+
+test("send rejects a value flag followed by another flag instead of posting the flag as its value", async () => {
+    await withServer(async ({ config }) => {
+        await assert.rejects(() => send(["205", "t", "--body", "--urgent"], config), /--body needs a value/);
     });
 });
 

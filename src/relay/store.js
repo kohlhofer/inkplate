@@ -139,7 +139,7 @@ export class Store {
     // understand, rather than silently destroying whatever that newer
     // schema's fields meant (finding m2) — a corrupt/unparseable file is a
     // different case and is still fine to overwrite.
-    put(n, fields, now) {
+    assertWritable(n) {
         const existingRaw = this.#readRawRecord(n);
         if (existingRaw && existingRaw.v !== SCHEMA_VERSION) {
             throw new ValidationError(
@@ -148,6 +148,11 @@ export class Store {
                 `page ${n} on disk has an unknown schema version (v=${existingRaw.v}); refusing to overwrite`,
             );
         }
+        return existingRaw;
+    }
+
+    put(n, fields, now) {
+        const existingRaw = this.assertWritable(n);
         const existing = existingRaw && existingRaw.expiresAt > now ? existingRaw : null;
         const urgent = !!fields.urgent;
         const urgentSince = urgent ? (existing?.urgent ? existing.urgentSince : now) : null;

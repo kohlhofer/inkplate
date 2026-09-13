@@ -263,38 +263,53 @@ test("an honest If-None-Match match leaves lastRedrawAt untouched, unlike a real
     );
 });
 
+function postPage(base, token, n, body) {
+    return fetch(`${base}/pages/${n}`, {
+        method: "POST",
+        headers: { ...auth(token), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+}
+
+test("with no urgent page, boot shows the first content page and the index comes after the last page", async () => {
+    await withServer(
+        async ({ base, boardToken, senderToken }) => {
+            await postPage(base, senderToken, 205, { title: "first" });
+            await postPage(base, senderToken, 230, { title: "second" });
+
+            const boot = await fetch(`${base}/frame?reason=boot&page=100`, { headers: auth(boardToken) });
+            assert.equal(boot.headers.get("x-page"), "205");
+            const next = await fetch(`${base}/frame?reason=button&page=230`, { headers: auth(boardToken) });
+            assert.equal(next.headers.get("x-page"), "100");
+        },
+        { frameRateLimit: { windowMs: 5000, max: 2 } },
+    );
+});
+
 test("a button press never triggers or consumes the urgent bypass (M1)", async () => {
     await withServer(async ({ base, boardToken, senderToken }) => {
-        await fetch(`${base}/pages/205`, {
-            method: "POST",
-            headers: { ...auth(senderToken), "Content-Type": "application/json" },
-            body: JSON.stringify({ title: "urgent page", urgent: true }),
-        });
+        await postPage(base, senderToken, 205, { title: "normal page" });
+        await postPage(base, senderToken, 250, { title: "urgent page", urgent: true });
 
-        // Board is currently showing 100 and presses the button: a
-        // timer/boot wake would be forced to 100 by the pending urgent
-        // page, but button must just cycle to the next live page instead.
+        // From the index the button goes to the first page, not to the pending urgent one.
         const res = await fetch(`${base}/frame?reason=button&page=100`, { headers: auth(boardToken) });
         assert.equal(res.status, 200);
         assert.equal(res.headers.get("x-page"), "205");
 
         const status = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
         assert.equal(status.lastUrgentBypassAt, null);
-        assert.equal(status.board.lastUrgentAckAt, null); // never shown on 100, so never acknowledged
+        assert.equal(status.board.lastUrgentAckAt, null);
     });
 });
 
-test("an unseen urgent page forces page 100 on a timer wake, and acknowledging it stamps lastUrgentAckAt", async () => {
+test("an unseen urgent page is put on the wall itself on a timer wake, and showing it acknowledges it", async () => {
     await withServer(async ({ base, boardToken, senderToken }) => {
-        await fetch(`${base}/pages/205`, {
-            method: "POST",
-            headers: { ...auth(senderToken), "Content-Type": "application/json" },
-            body: JSON.stringify({ title: "urgent page", urgent: true }),
-        });
+        await postPage(base, senderToken, 205, { title: "normal page" });
+        await postPage(base, senderToken, 250, { title: "urgent page", urgent: true });
 
         const res = await fetch(`${base}/frame?reason=timer&page=205`, { headers: auth(boardToken) });
         assert.equal(res.status, 200);
-        assert.equal(res.headers.get("x-page"), "100");
+        assert.equal(res.headers.get("x-page"), "250");
 
         const status = await (await fetch(`${base}/status`, { headers: auth(senderToken) })).json();
         assert.ok(status.lastUrgentBypassAt);
@@ -304,13 +319,10 @@ test("an unseen urgent page forces page 100 on a timer wake, and acknowledging i
 
 test("preview of page 100 shows the same urgent banner the board's /frame gets", async () => {
     await withServer(async ({ base, boardToken, senderToken }) => {
-        await fetch(`${base}/pages/205`, {
-            method: "POST",
-            headers: { ...auth(senderToken), "Content-Type": "application/json" },
-            body: JSON.stringify({ title: "urgent page", urgent: true }),
-        });
+        await postPage(base, senderToken, 205, { title: "urgent page", urgent: true });
 
-        const frame = await fetch(`${base}/frame?reason=timer&page=205`, { headers: auth(boardToken) });
+        // The button after the last page lands on the index.
+        const frame = await fetch(`${base}/frame?reason=button&page=205`, { headers: auth(boardToken) });
         assert.equal(frame.status, 200);
         assert.equal(frame.headers.get("x-page"), "100");
         const frameBytes = new Uint8Array(await frame.arrayBuffer());
@@ -331,7 +343,7 @@ test("a second urgent page posted within the bypass cooldown still shows as the 
             body: JSON.stringify({ title: "first urgent", urgent: true }),
         });
         const first = await fetch(`${base}/frame?reason=timer&page=205`, { headers: auth(boardToken) });
-        assert.equal(first.headers.get("x-page"), "100"); // bypass fired
+        assert.equal(first.headers.get("x-page"), "205"); // bypass fired
 
         await fetch(`${base}/pages/206`, {
             method: "POST",
@@ -358,8 +370,43 @@ test("POST /pages/:n creates a page and returns location/preview/warnings", asyn
         assert.equal(res.status, 201);
         const json = await res.json();
         assert.equal(json.preview, "/preview/205.png");
-        assert.equal(json.location, "listed on P100 at the next poll; full page via the button");
+        assert.equal(json.location, "first page: on the wall within about 3 minutes");
         assert.deepEqual(json.warnings, []);
+    });
+});
+
+test("describeLocation says whether a page is first, urgent, or behind another page", async () => {
+    const { describeLocation } = await import("../src/relay/server.js");
+    const summaries = [{ number: 150 }, { number: 205 }];
+    assert.equal(describeLocation({ number: 150, urgent: false }, summaries), "first page: on the wall within about 3 minutes");
+    assert.equal(describeLocation({ number: 205, urgent: false }, summaries), "the wall shows page 150 first; press the button to reach 205");
+    assert.equal(describeLocation({ number: 205, urgent: true }, summaries), "urgent: on the wall at the board's next poll");
+});
+
+test("a live page held by another sender can't be overwritten without replace, and replace warns", async () => {
+    await withServer(async ({ base, dataDir, senderToken }) => {
+        const other = new TokenStore(dataDir).addSender("other", { pages: "200-299", images: false, urgent: false });
+        const post = (token, body) =>
+            fetch(`${base}/pages/205`, {
+                method: "POST",
+                headers: { ...auth(token), "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+
+        assert.equal((await post(senderToken, { title: "mine" })).status, 201);
+
+        const refused = await post(other, { title: "theirs" });
+        assert.equal(refused.status, 409);
+        const error = (await refused.json()).error;
+        assert.equal(error.code, "page_taken");
+        assert.match(error.message, /held by 'hooks'/);
+
+        const replaced = await post(other, { title: "theirs", replace: true });
+        assert.equal(replaced.status, 201);
+        assert.ok((await replaced.json()).warnings.includes("replaced page 205 from 'hooks'"));
+
+        // the original sender re-posting over its own page is never blocked
+        assert.equal((await post(other, { title: "theirs again" })).status, 201);
     });
 });
 

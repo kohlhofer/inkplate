@@ -25,9 +25,8 @@ import {
     PAGE_ROUTE,
     PREVIEW_ROUTE,
 } from "./validate.js";
-import { resolvePage, shouldCoalesce, isUrgentBypassActive } from "../render/view.js";
+import { resolvePage, shouldCoalesce, isUrgentBypassActive, urgentAckAfterShowing } from "../render/view.js";
 import { renderFrame } from "../render/frame.js";
-import { bannerPage } from "../render/frontpage.js";
 import { lint } from "../render/lint.js";
 import { themeFor } from "../render/theme.js";
 import { regionsFor } from "../render/layout.js";
@@ -37,6 +36,15 @@ import { decodeImage, ImageError } from "../image/decode.js";
 import { computeFit, resample } from "../image/fit.js";
 import { ditherFloydSteinberg } from "../image/dither.js";
 import { quantizeBlocks } from "../image/blocks.js";
+
+// Tells a sender when their page will actually be on the wall, which depends
+// on where it falls in the page order (the wall defaults to the lowest page).
+export function describeLocation(record, liveSummaries) {
+    if (record.urgent) return "urgent: on the wall at the board's next poll";
+    const first = liveSummaries[0]?.number;
+    if (first === record.number) return "first page: on the wall within about 3 minutes";
+    return `the wall shows page ${first} first; press the button to reach ${record.number}`;
+}
 
 // Auth-before-body ordering (2.2) is load-bearing: an unauthenticated 2MiB
 // POST returns 401, never 413, because we never start reading the body
@@ -172,10 +180,8 @@ export function createServer(config = loadConfig()) {
 
         board.recordRedraw(now, resolvedNumber);
         if (urgentBypassActive) board.recordUrgentBypass(now);
-        if (resolvedNumber === 100) {
-            const banner = bannerPage(liveSummaries);
-            if (banner) board.recordUrgentAck(banner.urgentSince);
-        }
+        const ack = urgentAckAfterShowing(resolvedNumber, liveSummaries, boardSnapshot);
+        if (ack !== null) board.recordUrgentAck(ack);
 
         res.writeHead(200, {
             "Content-Type": "application/octet-stream",
@@ -208,7 +214,24 @@ export function createServer(config = loadConfig()) {
 
         const fields = validatePagePost(sender, digits, parsed);
         const now = Date.now();
+
+        // Every refusal happens before the image sidecar is touched, so a
+        // refused post never changes what's on disk.
+        store.assertWritable(fields.number);
+        const holder = store.getLive(fields.number, now);
+        const takingOver = holder !== null && holder.sender !== sender.name;
+        if (takingOver && !fields.replace) {
+            sendError(
+                res,
+                409,
+                "page_taken",
+                `page ${fields.number} is held by '${holder.sender}' until ${holder.expiresDisplay}; use another page or send "replace": true`,
+            );
+            return;
+        }
+
         const lintResult = lint({ title: fields.title, body: fields.body, layout: fields.layout, chart: fields.chart });
+        if (takingOver) lintResult.warnings.push(`replaced page ${fields.number} from '${holder.sender}'`);
 
         let imageMeta = null;
         if (fields.image) {
@@ -267,7 +290,7 @@ export function createServer(config = loadConfig()) {
                 number: record.number,
                 postedAt: record.postedAt,
                 expiresAt: record.expiresAt,
-                location: "listed on P100 at the next poll; full page via the button",
+                location: describeLocation(record, store.liveSummaries(now)),
                 preview: `/preview/${record.number}.png`,
                 warnings: lintResult.warnings,
             }),

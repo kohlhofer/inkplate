@@ -4,11 +4,11 @@ import { validatePageArg } from "../validate.js";
 import { formatDisplay } from "../format.js";
 
 const USAGE =
-    "usage: vt send <page> <title> [--body text|stdin] [--ttl 2h] [--urgent] [--layout ...] " +
+    "usage: vt send <page> <title> [--body text|stdin] [--ttl 2h] [--urgent] [--replace] [--layout ...] " +
     '[--image file] [--style dither|blocks] [--chart "1 2 3"] [--chart-type spark|bars] [--chart-label text]';
 
 const FLAGS_WITH_VALUE = new Set(["--body", "--ttl", "--layout", "--image", "--style", "--chart", "--chart-type", "--chart-label"]);
-const BOOLEAN_FLAGS = new Set(["--urgent"]);
+const BOOLEAN_FLAGS = { "--urgent": "urgent", "--replace": "replace" };
 const FLAG_TO_KEY = {
     "--body": "body",
     "--ttl": "ttl",
@@ -29,12 +29,17 @@ function parseArgs(args) {
     const opts = {};
     for (let i = 0; i < rest.length; i++) {
         const flag = rest[i];
-        if (BOOLEAN_FLAGS.has(flag)) {
-            opts.urgent = true;
+        if (flag in BOOLEAN_FLAGS) {
+            opts[BOOLEAN_FLAGS[flag]] = true;
             continue;
         }
         if (FLAGS_WITH_VALUE.has(flag)) {
-            opts[FLAG_TO_KEY[flag]] = rest[++i];
+            const value = rest[++i];
+            // `--body --urgent` would otherwise post "--urgent" as the body.
+            if (value === undefined || value.startsWith("--")) {
+                throw new Error(`${flag} needs a value\n${USAGE}`);
+            }
+            opts[FLAG_TO_KEY[flag]] = value;
             continue;
         }
         throw new Error(`unknown argument '${flag}'\n${USAGE}`);
@@ -43,7 +48,7 @@ function parseArgs(args) {
 }
 
 export async function send(args, config) {
-    const { page, title, body, ttl, urgent, layout, image, style, chart, chartType, chartLabel } = parseArgs(args);
+    const { page, title, body, ttl, urgent, replace, layout, image, style, chart, chartType, chartLabel } = parseArgs(args);
     if (!page || !title) throw new Error(USAGE);
     validatePageArg(page);
 
@@ -52,6 +57,7 @@ export async function send(args, config) {
     else if (body !== undefined) payload.body = body;
     if (ttl !== undefined) payload.ttl = ttl;
     if (urgent) payload.urgent = true;
+    if (replace) payload.replace = true;
     if (layout !== undefined) payload.layout = layout;
     if (image !== undefined) {
         payload.image = { data: fs.readFileSync(image).toString("base64"), style: style ?? "dither" };
@@ -70,7 +76,7 @@ export async function send(args, config) {
         process.exitCode = 1;
         return;
     }
-    const { number, expiresAt, warnings } = res.json;
-    console.log(`page ${number} live until ${formatDisplay(expiresAt)} · listed on P100 at the next poll · vt preview ${number}`);
+    const { number, expiresAt, location, warnings } = res.json;
+    console.log(`page ${number} live until ${formatDisplay(expiresAt)} · ${location} · vt preview ${number}`);
     for (const warning of warnings ?? []) console.error(`warning: ${warning}`);
 }
