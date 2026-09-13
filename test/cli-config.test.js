@@ -64,10 +64,21 @@ test("saveCliConfig writes mode 0600 and merges with any existing content", () =
 
 test("the relay-unreachable message text is exact", async () => {
     await assert.rejects(
-        () => callRelay({ relay: "http://127.0.0.1:1", token: null }, "GET", "/status"),
+        () => callRelay({ relay: "http://127.0.0.1:1", token: "dummy" }, "GET", "/status"),
         (err) => {
             assert.ok(err instanceof RelayUnreachableError);
             assert.equal(err.message, "no relay at http://127.0.0.1:1; start it with `vt serve`");
+            return true;
+        },
+    );
+});
+
+test("a missing token is detected locally, before ever attempting the request (M16)", async () => {
+    await assert.rejects(
+        () => callRelay({ relay: "http://127.0.0.1:1", token: null }, "GET", "/status"),
+        (err) => {
+            assert.equal(err instanceof RelayUnreachableError, false);
+            assert.equal(err.message, "no token configured; run vt token add <name> --pages A-B --save");
             return true;
         },
     );

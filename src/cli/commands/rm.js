@@ -1,8 +1,10 @@
 import { callRelay } from "../relayClient.js";
+import { validatePageArg } from "../validate.js";
 
 export async function rm(args, config) {
-    const [page] = args;
-    if (!page) throw new Error("usage: vt rm <page>");
+    const [page, ...rest] = args;
+    if (!page || rest.length > 0) throw new Error("usage: vt rm <page>");
+    validatePageArg(page);
 
     const res = await callRelay(config, "DELETE", `/pages/${page}`);
     if (res.status === 204) {

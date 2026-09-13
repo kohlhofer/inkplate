@@ -212,6 +212,13 @@ export class TokenStore {
         return true;
     }
 
+    // Existence check only — never exposes the hash or plaintext. Used by
+    // `vt serve` to warn when the board has no token yet (finding i2).
+    hasBoardToken() {
+        this.#reloadIfChanged();
+        return !!this.#data?.board;
+    }
+
     // The only path to the board token's plaintext: no separate "show", no
     // auto-print on first run.
     rotateBoardToken() {

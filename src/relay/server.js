@@ -284,10 +284,21 @@ export function createServer(config = loadConfig()) {
         res.end();
     }
 
+    // [{number, title, sender, urgent, layout, postedAt, expiresAt}] —
+    // enough for `vt ls`'s aligned columns without a second round trip per
+    // page (finding M14; used to be bare page numbers).
     function handleListPages(req, res) {
-        const numbers = store.liveSummaries(Date.now()).map((p) => p.number);
+        const pages = store.liveSummaries(Date.now()).map((p) => ({
+            number: p.number,
+            title: p.title,
+            sender: p.sender,
+            urgent: p.urgent,
+            layout: p.layout,
+            postedAt: p.postedAt,
+            expiresAt: p.expiresAt,
+        }));
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(numbers));
+        res.end(JSON.stringify(pages));
     }
 
     function handlePreview(req, res, rawSegment) {

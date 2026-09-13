@@ -91,12 +91,20 @@ test("liveSummaries lists only live pages, ascending", () => {
     assert.deepEqual(numbers, [250, 300]);
 });
 
-test("liveSummaries carries no body snippet — only number/title/postedDisplay/urgent(Since) (M21)", () => {
+test("liveSummaries carries no body snippet (M21) but does carry sender/layout/postedAt/expiresAt (M14)", () => {
     const store = new Store(tmpDir());
     const now = 1000;
-    store.put(205, { title: "t", body: "{green}all tests passed{/} extra", postedDisplay: "x", expiresAt: now + 1000 }, now);
+    store.put(
+        205,
+        { title: "t", body: "{green}all tests passed{/} extra", sender: "hooks", layout: "text", postedAt: now, postedDisplay: "x", expiresAt: now + 1000 },
+        now,
+    );
     const [summary] = store.liveSummaries(now);
-    assert.deepEqual(Object.keys(summary).sort(), ["number", "postedDisplay", "title", "urgent", "urgentSince"]);
+    assert.deepEqual(
+        Object.keys(summary).sort(),
+        ["expiresAt", "layout", "number", "postedAt", "postedDisplay", "sender", "title", "urgent", "urgentSince"],
+    );
+    assert.equal(summary.sender, "hooks");
 });
 
 test("formatDisplay renders 'Day D Mon HH:MM' including the day of week", () => {

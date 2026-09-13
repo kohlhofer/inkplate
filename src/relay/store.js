@@ -105,9 +105,13 @@ export class Store {
         return numbers.sort((a, b) => a - b);
     }
 
-    // Ascending [{number, title, postedDisplay, urgent, urgentSince}]. No
-    // body snippet (round-2 fix, M21): the title is what appears on P100,
-    // and a truncated snippet only ever bought confusable, mid-word cruft.
+    // Ascending [{number, title, sender, layout, postedAt, postedDisplay,
+    // expiresAt, urgent, urgentSince}]. No body snippet (round-2 fix, M21):
+    // the title is what appears on P100, and a truncated snippet only ever
+    // bought confusable, mid-word cruft. sender/layout/postedAt/expiresAt
+    // aren't used by the render pipeline but are cheap to carry here too,
+    // since GET /pages (finding M14) needs them for `vt ls` and has no
+    // other reason to re-read every record a second time.
     liveSummaries(now) {
         const summaries = [];
         for (const n of this.listNumbers()) {
@@ -116,7 +120,11 @@ export class Store {
             summaries.push({
                 number: record.number,
                 title: record.title,
+                sender: record.sender,
+                layout: record.layout,
+                postedAt: record.postedAt,
                 postedDisplay: record.postedDisplay,
+                expiresAt: record.expiresAt,
                 urgent: !!record.urgent,
                 urgentSince: record.urgentSince ?? null,
             });

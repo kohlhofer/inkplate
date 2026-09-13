@@ -17,16 +17,16 @@ export async function token(args, cliConfig, relayConfig = loadConfig()) {
         let urgent = false;
         let save = false;
         let replace = false;
+        const ADD_USAGE = "usage: vt token add <name> --pages 200-299 [--images] [--urgent] [--save] [--replace]";
         for (let i = 0; i < flags.length; i++) {
             if (flags[i] === "--pages") pages = flags[++i];
             else if (flags[i] === "--images") images = true;
             else if (flags[i] === "--urgent") urgent = true;
             else if (flags[i] === "--save") save = true;
             else if (flags[i] === "--replace") replace = true;
+            else throw new Error(`unknown argument '${flags[i]}'\n${ADD_USAGE}`);
         }
-        if (!pages) {
-            throw new Error("usage: vt token add <name> --pages 200-299 [--images] [--urgent] [--save] [--replace]");
-        }
+        if (!pages) throw new Error(ADD_USAGE);
 
         const raw = tokens.addSender(name, { pages, images, urgent, replace });
         console.log(raw);
@@ -45,7 +45,12 @@ export async function token(args, cliConfig, relayConfig = loadConfig()) {
     if (sub === "revoke") {
         const [name] = rest;
         if (!name) throw new Error("usage: vt token revoke <name>");
-        console.log(tokens.revokeSender(name) ? `revoked '${name}'` : `no such token '${name}'`);
+        if (tokens.revokeSender(name)) {
+            console.log(`revoked '${name}'`);
+        } else {
+            console.error(`vt: no such token '${name}'`);
+            process.exitCode = 1;
+        }
         return;
     }
 
@@ -56,5 +61,7 @@ export async function token(args, cliConfig, relayConfig = loadConfig()) {
         return;
     }
 
-    throw new Error("usage: vt token <add <name> --pages A-B [--images] [--urgent] [--save] | list | revoke <name> | board --rotate>");
+    throw new Error(
+        "usage: vt token <add <name> --pages A-B [--images] [--urgent] [--save] [--replace] | list | revoke <name> | board --rotate>",
+    );
 }

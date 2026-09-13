@@ -439,7 +439,7 @@ test("DELETE removes a live page (204) and 404s on a second delete", async () =>
     });
 });
 
-test("GET /pages lists only live page numbers, ascending, excluding 100", async () => {
+test("GET /pages lists live pages ascending, excluding 100, with number/title/sender/urgent/layout/postedAt/expiresAt (M14)", async () => {
     await withServer(async ({ base, senderToken }) => {
         for (const n of [250, 201]) {
             await fetch(`${base}/pages/${n}`, {
@@ -449,7 +449,16 @@ test("GET /pages lists only live page numbers, ascending, excluding 100", async 
             });
         }
         const res = await fetch(`${base}/pages`, { headers: auth(senderToken) });
-        assert.deepEqual(await res.json(), [201, 250]);
+        const pages = await res.json();
+        assert.deepEqual(
+            pages.map((p) => p.number),
+            [201, 250],
+        );
+        for (const p of pages) {
+            assert.deepEqual(Object.keys(p).sort(), ["expiresAt", "layout", "number", "postedAt", "sender", "title", "urgent"]);
+            assert.equal(p.sender, "hooks");
+            assert.equal(p.urgent, false);
+        }
     });
 });
 
