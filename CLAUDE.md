@@ -50,83 +50,12 @@ grid of 12x24 cells with text inset one cell. `node font/generate-font-data.mjs`
 regenerates `font/font-data.js` from it. Block, box-drawing and sextant characters are
 drawn procedurally so they tile.
 
-### From nothing to a working wall
-
-1. `npm install` (Node 23+). Everything below runs from the repo root; `npm link` once
-   makes `vt` available instead of `node bin/vt.js`.
-2. `node bin/vt.js token board --rotate` prints the board token once.
-   `node bin/vt.js token add <name> --pages 101-899 --images --urgent --save` creates your
-   own sender token and saves it to `~/.config/vt/config.json`.
-3. `make relay-install` runs the relay as a login service from this checkout (logs in
-   `relay.log`; `make relay-uninstall` removes it). For a foreground run instead:
-   `node bin/vt.js serve`, which prints the `RELAY_HOST`/`RELAY_PORT` lines for the board.
-4. `cp sketches/videotext/config.example.h sketches/videotext/config.h` (gitignored) and
-   fill in `WIFI_SSID`, `WIFI_PASS`, `RELAY_HOST` (the Mac's LAN IP, bare), `RELAY_PORT`,
-   `BOARD_TOKEN` (from step 2, never a sender token) and `POLL_SECONDS` (60 on wall
-   power, 900 on battery). A DHCP reservation for the Mac keeps `RELAY_HOST` valid.
-5. Switch the board on and `make upload SKETCH=sketches/videotext` (a bare `make upload`
-   builds `hello`). The first frame appears about 35 s later: "Nothing posted" on an
-   empty relay means everything works.
-6. `node bin/vt.js send 201 "Hello" --body "{green}it works{/}"` and
-   `node bin/vt.js status` to see what the board last fetched.
-
-The relay can't answer while the Mac sleeps or is off. The board then backs off (see
-"When things fail") and catches up on its own once the Mac is back.
-
-### What the wall shows
-
-- **The wall opens on content**: after boot, and on every timer wake, it shows the
-  lowest-numbered live page. The index (P100) is the default only when nothing is live.
-- **The button** steps through the live pages in order, then the index, then back to the
-  first page. Someone who pressed it in the last 10 minutes stays on their page; after
-  that the wall returns to the first page. Presses while the board is drawing (about 30 s)
-  are not registered.
-- **Pages 101-899**: header (number, sender token name, posted date), double-height title,
-  body, footer (position, next page, expiry).
-- **P100, the index**: today's date, a newsflash band while an urgent page is live, and one
-  row per live page (number, title, posted day and time). With no pages it says "Nothing
-  posted" over a stripe of all seven panel colours.
-- **Updates**: the board polls every `POLL_SECONDS`. The relay only lets a timer wake
-  redraw once every 3 minutes (a redraw is a 30 s full-panel flash), so a change to the
-  first page shows within about 3 minutes on wall power. An urgent page skips that wait:
-  the wall shows that page itself at the next poll, at most once per 10 minutes. Pick low
-  page numbers for what should be on the wall by default.
-- **Theme**: `VT_THEME=dark` (default) or `light`, read at relay start. The colour tables
-  in `src/render/theme.js` are still provisional until checked on the panel.
-
-### Sender reference
-
-- **CLI**: `node bin/vt.js send <page> <title> [--body text | stdin] [--ttl 2h] [--urgent]
-  [--replace] [--layout text|image-left|image-top|image] [--image file.png|jpg]
-  [--style dither|blocks] [--chart "1 2 3" --chart-type spark|bars --chart-label text]`,
-  plus `rm <page>`, `ls`, `preview <page> [--out file.png]`, `status`, `token add|list|
-  revoke|board`. Unknown flags are rejected.
-- **HTTP**: `POST /pages/:n` with `Authorization: Bearer <sender token>` and JSON fields
-  `title` (required, cut to 48 chars), `body` (max 8 KiB), `ttl` (seconds or `"90m"`,
-  `"2h"`, `"1d"`; default 1 day, max 7 days), `urgent` (boolean; token needs `--urgent`),
-  `layout`, `image` (`{data: base64, style}`; token needs `--images`; not with `text`),
-  `chart` (`{type, values: up to 600 numbers, label?}`; `text` layout only), `replace`
-  (boolean). Other keys are rejected. `DELETE /pages/:n`, `GET /pages`,
-  `GET /preview/:n.png`, `GET /status`.
-- **Page ranges**: each sender token may write only its `--pages` range; 100 is
-  generated. Ranges may overlap, but a live page belongs to whoever posted it: posting
-  over another sender's live page is `409 page_taken` unless the post sets `replace`,
-  which then warns. Any sender token may read every page. Token names appear on the wall.
-- **Markup**: `{red}` needs you, `{yellow}` attention, `{green}` fine, `{blue}` info,
-  `{orange}`, `{white}`, `{black}`; `{/}` resets. Tagged text sits on a band of that
-  colour; a tagged run of block characters (`{red}████`) is drawn in that colour. Unknown
-  tags render literally. Lines between ```` ``` ```` fences are never wrapped, only
-  cropped, for ASCII and block art.
-- **Layouts**: `text`; `image-left` (image left, text right); `image-top`; `image` (large
-  image, first body line as caption). Image `style`: `dither` for photos, `blocks` for a
-  mosaic look. PNG or JPEG, up to 4 MP.
-- **Charts**: `spark` scales min to max and labels both; `bars` starts at zero. Columns
-  are solid accent colour and snap to whole cells.
-- **Responses**: `201` carries `location` (whether the page is first on the wall, urgent,
-  or behind another page) and `warnings[]` for anything cut, dropped or replaced. Errors
-  are `{"error":{"code","message"}}` with a message that says what to change.
-- **Theme**: in `light`, page numbers and titles are white on a blue band, because blue
-  text is barely distinguishable from black on the panel.
+Setup, page order, the sender guide and the HTTP API live in README.md. Agents posting
+pages follow `.claude/skills/videotext/SKILL.md`; keep both in step with behaviour changes
+to the relay, renderer or CLI. The relay runs as a login service from this checkout
+(`make relay-install`), so `launchctl kickstart -k gui/$(id -u)/com.videotext.relay`
+picks up relay changes. Relay data (tokens, pages, board status) lives in
+`~/Library/Application Support/videotext` unless `VT_DATA` says otherwise.
 
 ### When things fail
 
