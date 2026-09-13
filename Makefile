@@ -41,3 +41,25 @@ port:
 # Writes the full 4MB image read off the board before any development started.
 restore-backup:
 	esptool --port $(PORT) --baud 115200 write-flash 0 $(BACKUP)
+
+# Regenerates sketches/videotext/src/render/font_data.h from font/bedstead.c.
+font:
+	node tools/generate-font-header.mjs
+
+# Builds the board's renderer and protocol code for the Mac. The renderer must
+# match the archived Node renderer pixel for pixel (test/native/compare.mjs);
+# the MCP handler, request validation and PNG encoder have their own checks.
+RENDER_SRC := sketches/videotext/src/render
+APP_SRC := sketches/videotext/src/app
+ARDUINOJSON ?= $(HOME)/Documents/Arduino/libraries/ArduinoJson/src
+NATIVE := build/native
+
+test-native:
+	@mkdir -p $(NATIVE)
+	clang++ -std=c++17 -O2 -Wall -Wextra -I $(RENDER_SRC) -isystem $(ARDUINOJSON) \
+		test/native/render_main.cpp $(RENDER_SRC)/*.cpp -o $(NATIVE)/render_main
+	node test/native/compare.mjs $(NATIVE)/render_main
+	clang++ -std=c++17 -O1 -Wall -Wextra -isystem $(ARDUINOJSON) \
+		test/native/app_test.cpp $(APP_SRC)/*.cpp -o $(NATIVE)/app_test
+	$(NATIVE)/app_test $(NATIVE)/app_test.png
+	node test/native/check-png.mjs $(NATIVE)/app_test.png
