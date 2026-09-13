@@ -14,7 +14,7 @@ import { themeFor } from "../render/theme.js";
 import { regionsFor } from "../render/layout.js";
 import { PANEL_WIDTH, PANEL_HEIGHT } from "../render/grid.js";
 import { PALETTE } from "../render/palette.js";
-import { decodeImage } from "../image/decode.js";
+import { decodeImage, ImageError } from "../image/decode.js";
 import { computeFit, resample } from "../image/fit.js";
 import { ditherFloydSteinberg } from "../image/dither.js";
 import { quantizeBlocks } from "../image/blocks.js";
@@ -176,22 +176,27 @@ export function createServer(config = loadConfig()) {
 
         let imageMeta = null;
         if (fields.image) {
+            let indices;
             try {
                 const decoded = decodeImage(Buffer.from(fields.image.data, "base64"));
                 const regions = regionsFor(fields.layout);
                 const box = regions.image ?? regions.text;
                 const fit = computeFit(decoded.width, decoded.height, box.w, box.h);
                 const resampled = resample(decoded.rgba, decoded.width, decoded.height, fit.width, fit.height);
-                const indices =
+                indices =
                     fields.image.style === "blocks"
                         ? quantizeBlocks(resampled, fit.width, fit.height)
                         : ditherFloydSteinberg(resampled, fit.width, fit.height);
-                store.putImage(fields.number, Buffer.from(indices));
                 imageMeta = { style: fields.image.style, width: fit.width, height: fit.height };
             } catch (err) {
-                err.imageError = true;
+                // Only decode/fit/dither errors (always ImageError, a fixed,
+                // safe-to-echo message) get the 400 treatment; a filesystem
+                // error from the putImage write below (outside this block)
+                // falls through to the generic 500 instead (finding m25).
+                if (err instanceof ImageError) err.imageError = true;
                 throw err;
             }
+            store.putImage(fields.number, Buffer.from(indices));
         } else {
             store.deleteImage(fields.number);
         }
@@ -357,8 +362,10 @@ export function createServer(config = loadConfig()) {
                 sendError(res, err.status, err.code, err.message);
                 return;
             }
-            // decodeImage/fit/dither/blocks throw plain Errors on bad or
-            // oversized image input; everything else is a genuine bug.
+            // decodeImage throws ImageError (fixed, safe-to-echo messages)
+            // on bad or oversized image input; everything else — including
+            // a putImage filesystem error — is a genuine bug or an
+            // environment fault, never echoed back to the client.
             const isImageError = err.imageError === true;
             console.error(`videotext: request error: ${err.stack ?? err}`);
             try {

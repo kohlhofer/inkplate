@@ -349,6 +349,25 @@ test("a posted image page renders through /frame (board token) and /preview with
     }
 });
 
+test("a filesystem error writing the image sidecar yields a generic 500, never a leaked path", async () => {
+    await withServer(async ({ base, senderToken, dataDir }) => {
+        // store.putImage's writeFileSync will EISDIR against a directory of
+        // this name, simulating any fs-level failure unrelated to decoding.
+        fs.mkdirSync(path.join(dataDir, "pages", "210.image.bin"), { recursive: true });
+
+        const res = await fetch(`${base}/pages/210`, {
+            method: "POST",
+            headers: { ...auth(senderToken), "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "t", layout: "image", image: { data: makePngBase64(8, 8), style: "dither" } }),
+        });
+        assert.equal(res.status, 500);
+        const json = await res.json();
+        assert.equal(json.error.code, "internal_error");
+        assert.equal(json.error.message, "internal error");
+        assert.equal(json.error.message.includes(dataDir), false);
+    });
+});
+
 test("a truncated image sidecar renders the page without the image instead of 500", async () => {
     await withServer(async ({ base, senderToken, boardToken, dataDir }) => {
         const posted = await fetch(`${base}/pages/210`, {
