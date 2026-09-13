@@ -14,7 +14,7 @@ BUILD  := build/$(notdir $(SKETCH))
 BACKUP := firmware-backup/inkplate6color-full-flash-2026-09-12.bin
 
 TAILNET_PLIST := $(HOME)/Library/LaunchAgents/com.videotext.tailnet.plist
-VT_BOARD ?= http://192.168.86.242
+VT_BOARD ?= http://videotext.local
 
 .PHONY: compile upload flash monitor log port restore-backup font test-native tailnet-install tailnet-uninstall
 

@@ -7,20 +7,22 @@
 # Tailscale".
 #
 #   videotext-proxy.sh start    start the node in the background (prints a login URL the first time)
+#   videotext-proxy.sh sync     point the proxy at the board's current address
 #   videotext-proxy.sh status   node state and what it serves
 #   videotext-proxy.sh stop     stop the node
-#   videotext-proxy.sh run      run in the foreground, for launchd
+#   videotext-proxy.sh run      run in the foreground and re-sync every minute, for launchd
 #
 # Settings (environment):
-#   VT_BOARD      the board's LAN URL                   default http://192.168.86.242
+#   VT_BOARD      the board's LAN URL                   default http://videotext.local
 #   VT_TS_NAME    tailnet name for this node            default videotext
 #   VT_TS_STATE   state directory                       default ~/Library/Application Support/videotext-tailnet
 #   VT_TS_BIN     directory with tailscale, tailscaled  default Homebrew's tailscale formula
 #   VT_EPHEMERAL  1 keeps state in memory, so the node is ephemeral and leaves the tailnet after it stops
+#   VT_SYNC_SECONDS  how often `run` re-checks the board's address  default 60
 
 set -eu
 
-BOARD="${VT_BOARD:-http://192.168.86.242}"
+BOARD="${VT_BOARD:-http://videotext.local}"
 NAME="${VT_TS_NAME:-videotext}"
 STATE_DIR="${VT_TS_STATE:-$HOME/Library/Application Support/videotext-tailnet}"
 BIN="${VT_TS_BIN:-$(brew --prefix tailscale 2>/dev/null)/bin}"
@@ -94,9 +96,52 @@ configure() {
             sleep 1
         done
     fi
-    ts serve --bg --https=443 "$BOARD" >/dev/null
     dns=$(json_field DNSName)
-    echo "serving https://${dns%.} -> $BOARD"
+    echo "node https://${dns%.} is up"
+    sync_target
+}
+
+# tailscaled resolves names with Go's own resolver, which doesn't do mDNS, so a
+# .local board name would fail with "no such host". macOS resolves it instead,
+# and the proxy gets the IPv4 address it currently maps to.
+resolve_target() {
+    host=$(printf '%s' "$BOARD" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')
+    case "$host" in
+    *.local)
+        # An mDNS answer can miss once while the cache refreshes, so try a few
+        # times, and print nothing (never fail) if the board stays silent:
+        # under `set -e` a failed lookup would otherwise end the whole loop.
+        ip=""
+        for _ in 1 2 3; do
+            ip=$(dscacheutil -q host -a name "$host" 2>/dev/null | awk '/^ip_address:/ { print $2; exit }')
+            [ -n "$ip" ] && break
+            sleep 1
+        done
+        if [ -n "$ip" ]; then
+            printf '%s' "$BOARD" | sed "s#$host#$ip#"
+        fi
+        ;;
+    *)
+        printf '%s' "$BOARD"
+        ;;
+    esac
+}
+
+current_target() {
+    ts serve status 2>/dev/null | sed -n 's/.*proxy \(http[^ ]*\).*/\1/p' | head -1
+}
+
+# Points the proxy at the board's current address, only when it changed.
+sync_target() {
+    target=$(resolve_target)
+    if [ -z "$target" ]; then
+        echo "can't resolve $BOARD right now; keeping $(current_target || true)" >&2
+        return 0
+    fi
+    if [ "$target" != "$(current_target)" ]; then
+        ts serve --bg --https=443 "$target" >/dev/null
+        echo "proxy now forwards to $target ($BOARD)"
+    fi
 }
 
 case "${1:-}" in
@@ -109,12 +154,20 @@ start)
     fi
     configure
     ;;
+sync)
+    require_bin
+    sync_target
+    ;;
 run)
     require_bin
-    trap 'kill "$(cat "$PIDFILE")" 2>/dev/null' TERM INT
+    trap 'kill "$(cat "$PIDFILE")" 2>/dev/null; exit 0' TERM INT
     start_tailscaled
     configure
-    wait "$(cat "$PIDFILE")"
+    # Follow the board if DHCP moves it; exit (and let launchd restart us) if tailscaled dies.
+    while running; do
+        sleep "${VT_SYNC_SECONDS:-60}"
+        sync_target
+    done
     ;;
 status)
     ts status --self --peers=false

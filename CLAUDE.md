@@ -63,7 +63,11 @@ that arrives; the MacBook only tested it (2026-09-13, ephemeral node). Gotchas: 
 paths over ~104 bytes fail with "bind: invalid argument", so keep `VT_TS_STATE` short;
 `tailscale up` must keep running until login completes, or the auth URL dies with
 "http 410: auth path not found"; the Homebrew formula stays unlinked so the Tailscale
-app's CLI remains the default. The launchd `run` mode hasn't been exercised yet.
+app's CLI remains the default; Homebrew's `tailscaled` uses Go's own resolver, so a
+`.local` serve target fails with "lookup videotext.local: no such host". The script
+resolves `VT_BOARD` through `dscacheutil` and re-syncs the serve target every minute in
+`run` mode; a failed lookup keeps the old target rather than exiting. The loop was tested
+by sourcing the script; launchd itself hasn't run it yet.
 
 ### Firmware gotchas
 

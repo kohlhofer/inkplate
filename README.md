@@ -66,7 +66,7 @@ Only devices in the same tailnet, or ones the node is shared with, can reach tha
 
 1. `brew install tailscale && brew unlink tailscale`. Unlinking keeps the Tailscale app's own CLI first on your PATH; the script calls Homebrew's copy directly.
 2. `tailnet/videotext-proxy.sh start`, open the login link it prints, and approve the node. Then `tailnet/videotext-proxy.sh stop`. The node's state survives, so this happens once.
-3. `make tailnet-install` runs the proxy as a login service (`make tailnet-uninstall` removes it). Set `VT_BOARD=http://<board-ip>` if the board isn't at 192.168.86.242, and reserve its IP in the router.
+3. `make tailnet-install` runs the proxy as a login service (`make tailnet-uninstall` removes it). It finds the board as `videotext.local` and checks every minute whether that name points somewhere new, so a DHCP change doesn't break it. `tailscaled` can't look up `.local` names itself, so the script asks macOS and hands the proxy the address. `tailnet/videotext-proxy.sh sync` does the same check by hand.
 4. Point agents at the tailnet name, which Claude Code resolves fine:
 
    ```sh
