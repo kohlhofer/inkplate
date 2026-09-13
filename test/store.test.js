@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Store, parseTtl, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS } from "../src/relay/store.js";
+import { Store, parseTtl, formatDisplay, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS } from "../src/relay/store.js";
 
 function tmpDir() {
     return fs.mkdtempSync(path.join(os.tmpdir(), "videotext-store-"));
@@ -89,6 +89,11 @@ test("liveSummaries lists only live pages, ascending", () => {
     store.put(250, { title: "b", body: "", postedDisplay: "x", expiresAt: now + 1000 }, now);
     const numbers = store.liveSummaries(now).map((p) => p.number);
     assert.deepEqual(numbers, [250, 300]);
+});
+
+test("formatDisplay renders 'Day D Mon HH:MM' including the day of week", () => {
+    const ms = new Date(2026, 8, 12, 14, 5).getTime(); // Sat 12 Sep 2026, 14:05 local
+    assert.equal(formatDisplay(ms), "Sat 12 Sep 14:05");
 });
 
 test("remove deletes a live page and reports whether one existed", () => {

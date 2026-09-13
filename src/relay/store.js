@@ -20,6 +20,19 @@ export function parseTtl(input) {
     return seconds;
 }
 
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "Sat 12 Sep 14:05" — computed once at POST time and stored verbatim
+// (postedDisplay/expiresDisplay), never recomputed relative to "today" at
+// render time (2.7's determinism contract).
+export function formatDisplay(ms) {
+    const d = new Date(ms);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]} ${hh}:${mm}`;
+}
+
 // Page CRUD on $VT_DATA/pages/<n>.json (+ <n>.image.bin sidecar). A corrupt
 // record, a stale schema version, or a missing/corrupt sidecar are skipped
 // (and logged), never fatal — see finding 5 and the plan's determinism

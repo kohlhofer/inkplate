@@ -133,5 +133,5 @@ export function renderFrame(pageNumber, storeSnapshot, boardSnapshot, theme) {
 
     const bytes = packTo4bpp(fb);
     const etag = createHash("sha256").update(bytes).digest("hex");
-    return { bytes, etag };
+    return { bytes, etag, indices: fb };
 }
