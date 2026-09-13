@@ -31,7 +31,7 @@
 #include "config.example.h"
 #endif
 
-#define FW_VERSION "2.0.0"
+#define FW_VERSION "2.0.1"
 #define BUTTON_PIN 36
 #define SCREEN_FILE "/screen.json"
 #define DRAWN_HASH_FILE "/drawn.hash"
@@ -69,6 +69,10 @@ struct Sent {
 
 State state;
 SemaphoreHandle_t stateMutex;
+
+// Written from the WiFi event task and loop(), read by /status and the log.
+volatile int lastDisconnectReason = 0;
+volatile unsigned wifiRejoins = 0;
 TaskHandle_t drawTaskHandle;
 
 struct Lock {
@@ -558,6 +562,9 @@ void handleStatus() {
     doc["hostname"] = HOSTNAME ".local";
     doc["firmware"] = FW_VERSION;
     doc["uptimeSeconds"] = millis() / 1000;
+    doc["bootReason"] = resetReasonName();
+    doc["wifiRejoins"] = wifiRejoins;
+    doc["lastWifiDisconnectReason"] = lastDisconnectReason;
     doc["rssi"] = WiFi.RSSI();
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["freePsram"] = ESP.getFreePsram();
@@ -608,7 +615,40 @@ void setupServer() {
 
 // ---------------------------------------------------------------- setup and loop
 
+const char* resetReasonName() {
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power-on or reset";  // the EN reset from USB serial reports as power-on too
+    case ESP_RST_EXT: return "reset pin";
+    case ESP_RST_SW: return "software restart";
+    case ESP_RST_PANIC: return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    default: return "other";
+    }
+}
+
+void onWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
+    switch (event) {
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+        Serial.println("videotext: wifi associated");
+        break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        Serial.printf("videotext: wifi got ip %s\n", WiFi.localIP().toString().c_str());
+        break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+        lastDisconnectReason = info.wifi_sta_disconnected.reason;
+        Serial.printf("videotext: wifi disconnected, reason %d\n", lastDisconnectReason);
+        break;
+    default:
+        break;
+    }
+}
+
 void connectWifi() {
+    WiFi.onEvent(onWifiEvent);
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(HOSTNAME);
     WiFi.setAutoReconnect(true);
@@ -617,7 +657,12 @@ void connectWifi() {
     WiFi.enableIPv6();
     // The wall runs on USB power, so trade WiFi power saving for quick replies.
     WiFi.setSleep(false);
+#ifdef VT_TEST_FAILED_FIRST_JOIN
+    // Test build only (see CLAUDE.md): the boot join fails, so keepWifiUp has to recover.
+    WiFi.begin(WIFI_SSID, "not-the-password");
+#else
     WiFi.begin(WIFI_SSID, WIFI_PASS);
+#endif
     const unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) delay(50);
 }
@@ -630,7 +675,8 @@ void setup() {
 
     if (!LittleFS.begin(true)) Serial.println("videotext: LittleFS mount failed; screens won't survive a restart");
     loadScreen();
-    Serial.printf("videotext: firmware %s, stored screen: %s\n", FW_VERSION, state.hasScreen ? "yes" : "no");
+    Serial.printf("videotext: firmware %s, boot after %s, stored screen: %s\n", FW_VERSION, resetReasonName(),
+                  state.hasScreen ? "yes" : "no");
 
     // Join WiFi before the first draw, so a board without a stored screen draws
     // its connection details once instead of "joining WiFi" and then again.
@@ -654,8 +700,36 @@ void startMdnsOnce() {
     }
 }
 
+// The core's auto-reconnect doesn't retry every failure (a first join that
+// times out, for example, is simply left alone), so the board rejoins on its
+// own schedule: after 20 s without WiFi, then every 20 s, and restarts after
+// five minutes, which costs no refresh since an unchanged frame isn't redrawn.
+void keepWifiUp() {
+    static unsigned long downSince = 0;
+    static unsigned long lastAttempt = 0;
+    if (WiFi.status() == WL_CONNECTED) {
+        downSince = 0;
+        return;
+    }
+    const unsigned long now = millis();
+    if (downSince == 0) downSince = now;
+    if (now - downSince > 5 * 60 * 1000UL) {
+        Serial.println("videotext: no WiFi for 5 minutes, restarting");
+        delay(100);
+        ESP.restart();
+    }
+    if (now - downSince > 20000 && now - lastAttempt > 20000) {
+        lastAttempt = now;
+        wifiRejoins++;
+        Serial.printf("videotext: no WiFi for %lus (last reason %d), rejoining\n", (now - downSince) / 1000, lastDisconnectReason);
+        WiFi.disconnect();
+        WiFi.begin(WIFI_SSID, WIFI_PASS);
+    }
+}
+
 void loop() {
     server.handleClient();
+    keepWifiUp();
 
     // Keep the address on the connection screen current if DHCP moves us.
     static unsigned long lastWifiCheck = 0;

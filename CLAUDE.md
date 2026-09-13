@@ -69,6 +69,13 @@ so a 30 s refresh on core 0 doesn't trip the watchdog.
   must send `Content-Type: application/json`; `curl -d` alone sends a form.
 - Types used in function signatures in the `.ino` must be declared before the first
   function: the Arduino builder inserts prototypes there.
+- The core's WiFi auto-reconnect doesn't reliably recover a boot whose first join failed: on
+  2026-09-13 the board came up after a night switched off and stayed off WiFi until reset.
+  `keepWifiUp()` rejoins after 20 s down and restarts after 5 minutes. To test that path, build
+  with `--build-property "compiler.cpp.extra_flags=-DVT_TEST_FAILED_FIRST_JOIN"` (the boot join
+  uses a wrong password) and watch `make log`: a rejoin line at 20 s, then `wifi got ip`.
+  `/status` reports `bootReason`, `wifiRejoins` and `lastWifiDisconnectReason`. The EN reset from
+  USB serial reports as power-on, same as the side switch.
 - Claude Code can't connect to `http://videotext.local/mcp` (30 s timeout), while curl, Node
   and the MCP SDK can. Register it with the IP. Without IPv6 on the board, macOS waits 5 s
   on every `.local` lookup for an AAAA answer.
