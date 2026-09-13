@@ -14,7 +14,8 @@ const ROW_WIDTH = COLS * CELL_WIDTH;
 const LISTING_ROWS = BODY_ROWS - 1; // the last body row always stays blank, separating the list from the footer (m19)
 const TITLE_FIELD = 34; // ~34-column title budget, M21
 const TIME_FIELD = 9; // "Sat 22:51"
-const RED_INDEX = 4; // palette.js's fixed red index — urgent rows are literally red, independent of theme
+const RED_INDEX = 4; // palette.js's fixed red index
+const WHITE_INDEX = 1;
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -94,12 +95,19 @@ function drawColorStripe(fb, y, height) {
     }
 }
 
-// One listing row: page number in the accent colour (red if that page is
-// itself urgent), title cut to 34 columns with a dot leader, posted day+time
-// right-aligned in the last 9 columns (M21). No body snippet — the title is
-// what shows on the front page.
+// One listing row: page number in the accent colour, title cut to 34 columns
+// with a dot leader, posted day+time right-aligned in the last 9 columns
+// (M21). An urgent page's number is white on a red band like the newsflash:
+// red text on the panel's black is about 2:1 and would make urgent rows the
+// dimmest on the page. No body snippet — the title is what shows here.
 function drawListingRow(fb, theme, y, page) {
-    drawText(fb, TEXT_X, y, String(page.number), page.urgent ? RED_INDEX : theme.accent);
+    const number = String(page.number);
+    if (page.urgent) {
+        fillRect(fb, TEXT_X - 4, y, cpLength(number) * CELL_WIDTH + 8, CELL_HEIGHT, RED_INDEX);
+        drawText(fb, TEXT_X, y, number, WHITE_INDEX);
+    } else {
+        drawText(fb, TEXT_X, y, number, theme.accent);
+    }
 
     const title = cpSlice(page.title, 0, TITLE_FIELD);
     const dots = ".".repeat(Math.max(0, TITLE_FIELD - cpLength(title)));

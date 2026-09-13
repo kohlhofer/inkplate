@@ -27,6 +27,19 @@ const page = (overrides) => ({
     ...overrides,
 });
 
+test("an urgent listing row shows its number white on a red band, not red on the background", () => {
+    const fb = createFramebuffer();
+    renderFrontpage(fb, theme, {
+        liveSummaries: [page({ number: 201, urgent: true, urgentSince: 1 }), page({ number: 300 })],
+        board: { batteryLow: false },
+        now: NOW,
+    });
+    const urgentRow = BODY_ROW_START;
+    const plainRow = BODY_ROW_START + 1;
+    assert.ok(readRow(fb, urgentRow, 4) > 3 * 12 * 20, "red band behind the urgent number");
+    assert.equal(readRow(fb, plainRow, 4), 0, "no red on a normal row");
+});
+
 test("footer says 'next » <first page>' when pages exist, 'no pages yet' otherwise (M8)", () => {
     assert.equal(footerText("blank", { batteryLow: false }, [page({ number: 300, title: "Rain per hour" })]), "next » 300 Rain per hour");
     assert.equal(footerText("blank", { batteryLow: false }, []), "no pages yet");
