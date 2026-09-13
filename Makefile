@@ -5,6 +5,7 @@
 #   make log LOG_SECONDS=90               capture serial output without an interactive terminal
 #   make font                             regenerate the board's Bedstead font header
 #   make test-native                      compare the C++ renderer with the archived Node renderer
+#   make tailnet-install                  serve the wall in the tailnet from this Mac (login service)
 
 SKETCH ?= sketches/hello
 FQBN   := soldered-inkplate-boards:esp32:Inkplate6COLOR
@@ -12,7 +13,10 @@ PORT   ?= $(firstword $(wildcard /dev/cu.usbserial-*) $(wildcard /dev/cu.wchusbs
 BUILD  := build/$(notdir $(SKETCH))
 BACKUP := firmware-backup/inkplate6color-full-flash-2026-09-12.bin
 
-.PHONY: compile upload flash monitor log port restore-backup font test-native
+TAILNET_PLIST := $(HOME)/Library/LaunchAgents/com.videotext.tailnet.plist
+VT_BOARD ?= http://192.168.86.242
+
+.PHONY: compile upload flash monitor log port restore-backup font test-native tailnet-install tailnet-uninstall
 
 compile:
 	arduino-cli compile --fqbn $(FQBN) --output-dir $(BUILD) $(SKETCH)
@@ -63,3 +67,20 @@ test-native:
 		test/native/app_test.cpp $(APP_SRC)/*.cpp -o $(NATIVE)/app_test
 	$(NATIVE)/app_test $(NATIVE)/app_test.png
 	node test/native/check-png.mjs $(NATIVE)/app_test.png
+
+# The tailnet proxy for the Mac that stays on at home (see README.md). The first
+# run needs the node approved once: run `tailnet/videotext-proxy.sh start` by hand,
+# open the login link, `tailnet/videotext-proxy.sh stop`, then install this.
+tailnet-install:
+	@test -x "$$(brew --prefix tailscale 2>/dev/null)/bin/tailscaled" || \
+		(echo "run: brew install tailscale && brew unlink tailscale" && exit 1)
+	@mkdir -p $(HOME)/Library/Logs
+	sed -e 's#__REPO__#$(CURDIR)#' -e 's#__BOARD__#$(VT_BOARD)#' -e 's#__LOGDIR__#$(HOME)/Library/Logs#' \
+		tailnet/com.videotext.tailnet.plist.template > $(TAILNET_PLIST)
+	launchctl load $(TAILNET_PLIST)
+	@echo "installed; logs in ~/Library/Logs/videotext-tailnet.log"
+
+tailnet-uninstall:
+	-launchctl unload $(TAILNET_PLIST) 2>/dev/null
+	rm -f $(TAILNET_PLIST)
+	@echo "uninstalled"

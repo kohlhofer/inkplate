@@ -56,6 +56,15 @@ the panel is free and skips frames whose FNV-1a hash matches `/drawn.hash`, so r
 don't flash the panel. `display()` waits on the busy pin with `delay(1)`, which yields,
 so a 30 s refresh on core 0 doesn't trip the watchdog.
 
+Tailnet access (`tailnet/`, README "Reaching the Wall over Tailscale"): the board can't run
+Tailscale, so an always-on Mac runs a second userspace `tailscaled` named `videotext`
+that serves HTTPS and forwards to the board. It is meant to run on the Mac Studio once
+that arrives; the MacBook only tested it (2026-09-13, ephemeral node). Gotchas: Unix socket
+paths over ~104 bytes fail with "bind: invalid argument", so keep `VT_TS_STATE` short;
+`tailscale up` must keep running until login completes, or the auth URL dies with
+"http 410: auth path not found"; the Homebrew formula stays unlinked so the Tailscale
+app's CLI remains the default. The launchd `run` mode hasn't been exercised yet.
+
 ### Firmware gotchas
 
 - Include the project headers before `Inkplate.h`: InkplateLibrary `#define`s `BLACK` and

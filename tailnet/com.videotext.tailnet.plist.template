@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Keeps the videotext tailnet proxy running on the always-on Mac. Installed by
+     `make tailnet-install`, which fills in the paths; never installed automatically. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.videotext.tailnet</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>__REPO__/tailnet/videotext-proxy.sh</string>
+        <string>run</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>VT_BOARD</key>
+        <string>__BOARD__</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__LOGDIR__/videotext-tailnet.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOGDIR__/videotext-tailnet.log</string>
+</dict>
+</plist>

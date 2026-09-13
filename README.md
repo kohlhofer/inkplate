@@ -58,6 +58,23 @@ A new screen triggers a full refresh that flashes the panel for about 30 seconds
 
 The button toggles between the screen and the connection details. The board keeps WiFi on all the time, so it wants USB power; on battery it lasts days, not months.
 
+## Reaching the Wall over Tailscale
+
+The ESP32 can't run Tailscale, so a Mac that stays on at home puts the wall in the tailnet as its own node, `videotext`. The node serves `https://videotext.<tailnet>.ts.net` with a real certificate and forwards to the board on the LAN. It's a second `tailscaled` in userspace mode with its own state, so it runs next to the Tailscale app without touching it. The plan is to run it on the Mac Studio.
+
+Only devices in the same tailnet, or ones the node is shared with, can reach that address. Don't turn on Funnel: the key keeps guest devices off the wall, but that's all it does. The tailnet needs MagicDNS and HTTPS certificates turned on.
+
+1. `brew install tailscale && brew unlink tailscale`. Unlinking keeps the Tailscale app's own CLI first on your PATH; the script calls Homebrew's copy directly.
+2. `tailnet/videotext-proxy.sh start`, open the login link it prints, and approve the node. Then `tailnet/videotext-proxy.sh stop`. The node's state survives, so this happens once.
+3. `make tailnet-install` runs the proxy as a login service (`make tailnet-uninstall` removes it). Set `VT_BOARD=http://<board-ip>` if the board isn't at 192.168.86.242, and reserve its IP in the router.
+4. Point agents at the tailnet name, which Claude Code resolves fine:
+
+   ```sh
+   claude mcp add --scope user --transport http videotext https://videotext.<tailnet>.ts.net/mcp --header "X-Api-Key: <key>"
+   ```
+
+`VT_EPHEMERAL=1 tailnet/videotext-proxy.sh start` makes a throwaway node that leaves the tailnet after it stops, which is how this was tested on 2026-09-13: the guide, the key check and a full MCP session with preview images all worked through the tailnet name.
+
 ## Setting Up the Board
 
 1. Install the toolchain from [CLAUDE.md](CLAUDE.md), plus `arduino-cli lib install ArduinoJson`.
