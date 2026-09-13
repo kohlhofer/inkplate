@@ -23,6 +23,8 @@
 #define FRAME_HEIGHT 448
 #define FRAME_BYTES ((FRAME_WIDTH * FRAME_HEIGHT) / 2)
 #define WIFI_TIMEOUT_MS 15000
+// A join to a known BSSID/channel either comes up in 1-3 s or not at all.
+#define WIFI_CACHED_TIMEOUT_MS 4000
 #define WIFI_POLL_MS 10
 // B7: a dead/unreachable relay must fail fast on the TCP connect, not ride
 // the full read timeout every single wake — the read timeout still needs to
@@ -103,14 +105,20 @@ static bool waitForWifi(uint32_t timeoutMs) {
 // wakes); falls back to a normal scan-and-join in the same wake if the
 // cached join doesn't come up (the AP may have rebooted onto a different
 // channel/BSSID) — never a static IP (finding M26).
-static void connectWifi() {
+static const char *connectWifi() {
     WiFi.mode(WIFI_STA);
     bool connected = false;
+    const char *joinPath = "scan";
     if (haveCachedWifi) {
+        joinPath = "cached";
         WiFi.begin(WIFI_SSID, WIFI_PASS, cachedChannel, cachedBssid);
-        connected = waitForWifi(WIFI_TIMEOUT_MS);
+        connected = waitForWifi(WIFI_CACHED_TIMEOUT_MS);
         if (!connected) {
-            WiFi.disconnect();
+            // Radio fully off and back on: a second begin() while the core is
+            // still auto-reconnecting to the stale BSSID can be ignored.
+            joinPath = "fallback";
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_STA);
             WiFi.begin(WIFI_SSID, WIFI_PASS);
             connected = waitForWifi(WIFI_TIMEOUT_MS);
         }
@@ -126,6 +134,7 @@ static void connectWifi() {
     } else {
         haveCachedWifi = false; // don't keep retrying a possibly-stale cache
     }
+    return joinPath;
 }
 
 // Unpacks row-major 4bpp (2px/byte, high nibble = even x) straight to the
@@ -146,35 +155,39 @@ static void drawFrame(const uint8_t *packed) {
     }
 }
 
-// What to actually do about a given failure cause — paired with the cause
-// itself (M7's headline) as the local screen's second line.
+// What to actually do about a given failure cause — the local screen's
+// second line. Each stays within 46 characters (see drawLocalMessage).
 static String actionHint(const String &cause) {
-    if (cause.startsWith("WiFi")) return "check WIFI_SSID/WIFI_PASS in config.h";
+    if (cause.startsWith("WiFi")) return "check WIFI_SSID and WIFI_PASS in config.h";
     if (cause.startsWith("can't reach relay")) return "start the relay: node bin/vt.js serve";
-    if (cause == "board token rejected") return "set BOARD_TOKEN from vt token board --rotate";
-    return "check the relay log";
+    if (cause == "board token rejected") return "BOARD_TOKEN: vt token board --rotate";
+    return "run vt status on the relay machine";
 }
 
-// Local, dumb fallback screens for when the relay can't be reached at all —
-// drawn with Inkplate's built-in font at a size chosen to roughly match the
-// wall's Spleen rendering, black background/white text (finding M7), not
-// the relay's own Spleen rendering. Both lines are built to stay within the
-// panel's ~600px width at this text size. `elapsedMinutes` is 0 (omitted)
-// on the very first failure, when there's nothing to report yet.
-static void drawLocalMessage(const String &cause, uint32_t elapsedMinutes) {
-    String line2 = actionHint(cause);
-    if (elapsedMinutes > 0) {
-        line2 = String(elapsedMinutes) + " min - " + line2;
-    }
+// Size 2 of the built-in font is 12 px per character; from x=20 that leaves
+// 46 characters before the panel edge. Lines are cut rather than wrapped.
+static void printLine(int y, String text) {
+    if (text.length() > 46) text = text.substring(0, 46);
+    display.setCursor(20, y);
+    display.print(text);
+}
 
+// Local fallback screens for when the relay can't be reached or refuses the
+// board: black background, white built-in font. The duration line would go
+// stale while the screen stays up, so it says when failing started counting
+// in minutes at draw time and that the board keeps retrying on its own.
+static void drawLocalMessage(const String &cause, uint32_t elapsedMinutes) {
     display.clearDisplay();
-    display.setTextColor(INKPLATE_WHITE, INKPLATE_BLACK);
     display.fillRect(0, 0, FRAME_WIDTH, FRAME_HEIGHT, INKPLATE_BLACK);
+    display.setTextColor(INKPLATE_WHITE, INKPLATE_BLACK);
+    display.setTextWrap(false);
     display.setTextSize(2);
-    display.setCursor(20, 190);
-    display.println(cause);
-    display.setCursor(20, 220);
-    display.println(line2);
+    printLine(170, cause);
+    printLine(200, actionHint(cause));
+    if (elapsedMinutes > 0) {
+        printLine(250, String("had been failing for ") + String(elapsedMinutes) + " min");
+    }
+    printLine(280, "retries on its own; button retries now");
     display.display();
 }
 
@@ -193,12 +206,15 @@ void setup() {
     const float battery = display.readBattery();
 
     const uint32_t wifiStart = millis();
-    connectWifi();
+    const char *joinPath = connectWifi();
     const uint32_t wifiMs = millis() - wifiStart;
 
     String host = RELAY_HOST;
     String cause;
     bool success = false;
+    // Only a missing network or relay is worth backing off for; a relay that
+    // answers with an error is up and should be asked again at the normal pace.
+    bool unreachable = false;
     int httpStatus = 0; // 0 = never attempted (WiFi never joined)
     uint32_t fetchMs = 0;
     uint32_t readMs = 0;
@@ -208,6 +224,7 @@ void setup() {
 
     if (WiFi.status() != WL_CONNECTED) {
         cause = String("WiFi ") + WIFI_SSID + " not joined";
+        unreachable = true;
     } else {
         host = resolveHost();
         char url[160];
@@ -234,7 +251,10 @@ void setup() {
                 // A negative code is HTTPClient reporting a connect/transport
                 // failure, not a real HTTP response (finding M6).
                 cause = String("can't reach relay ") + host + ":" + String(RELAY_PORT);
-            } else if (httpStatus == 401) {
+                unreachable = true;
+            } else if (httpStatus == 401 || httpStatus == 403) {
+                // 403 is a valid token of the wrong kind, usually a sender
+                // token pasted into BOARD_TOKEN; the fix is the same.
                 cause = "board token rejected";
             } else if (httpStatus == 304) {
                 success = true;
@@ -263,13 +283,15 @@ void setup() {
                 cause = String("relay error ") + String(httpStatus);
             }
 
-            if (success) {
+            // Only a 200 changes what's on the panel, so only a 200 may change
+            // the cached ETag and page. A 304 means the panel already shows
+            // lastEtag; touching the cache there made the next wake send no
+            // If-None-Match and redraw an unchanged frame every other wake.
+            if (success && httpStatus == 200) {
                 const String newEtag = http.header("ETag");
-                // Longer than the fixed buffer, or simply absent: clear
-                // lastEtag rather than keep the previous (now possibly
-                // stale) value, so the next poll sends no If-None-Match and
-                // forces an honest compare instead of a silently wrong
-                // match (finding m5).
+                // Longer than the fixed buffer, or absent: clear lastEtag so
+                // the next poll forces an honest compare instead of a
+                // silently wrong match.
                 if (newEtag.length() > 0 && newEtag.length() <= 64) {
                     newEtag.toCharArray(lastEtag, sizeof(lastEtag));
                 } else {
@@ -285,6 +307,7 @@ void setup() {
         } else {
             fetchMs = millis() - fetchStart;
             cause = String("can't reach relay ") + host + ":" + String(RELAY_PORT);
+            unreachable = true;
         }
     }
 
@@ -322,19 +345,21 @@ void setup() {
         }
         // Any other failure count: log only, keep the current screen.
 
-        // B7: back off exponentially while failing, capped, so a dead relay
-        // doesn't wake the board (and burn WiFi joins) every POLL_SECONDS
-        // all night.
-        const uint32_t backoffExp = consecutiveFailures > 10 ? 10 : (uint32_t)consecutiveFailures;
-        const uint64_t backoff = (uint64_t)POLL_SECONDS << backoffExp;
-        sleepSeconds = (backoff == 0 || backoff > MAX_BACKOFF_SECONDS) ? MAX_BACKOFF_SECONDS : (uint32_t)backoff;
+        // B7: back off exponentially while the network or relay is gone,
+        // capped, so a sleeping laptop doesn't wake the board (and burn WiFi
+        // joins) every POLL_SECONDS all night.
+        if (unreachable) {
+            const uint32_t backoffExp = consecutiveFailures > 10 ? 10 : (uint32_t)consecutiveFailures;
+            const uint64_t backoff = (uint64_t)POLL_SECONDS << backoffExp;
+            sleepSeconds = (backoff == 0 || backoff > MAX_BACKOFF_SECONDS) ? MAX_BACKOFF_SECONDS : (uint32_t)backoff;
+        }
         failureElapsedSeconds += sleepSeconds;
     }
 
     const uint32_t totalMs = millis() - wakeStart;
-    Serial.printf("videotext: reason=%s wifi_ms=%u fetch_ms=%u read_ms=%u unpack_ms=%u display_ms=%u total_ms=%u "
-                  "status=%d page=%d etag=%s sleep_s=%u\n",
-                  reason, wifiMs, fetchMs, readMs, unpackMs, displayMs, totalMs, httpStatus, lastPage,
+    Serial.printf("videotext: reason=%s join=%s wifi_ms=%u fetch_ms=%u read_ms=%u unpack_ms=%u display_ms=%u "
+                  "total_ms=%u status=%d page=%d etag=%s sleep_s=%u\n",
+                  reason, joinPath, wifiMs, fetchMs, readMs, unpackMs, displayMs, totalMs, httpStatus, lastPage,
                   lastEtag[0] != '\0' ? lastEtag : "empty", sleepSeconds);
 
     esp_sleep_enable_timer_wakeup((uint64_t)sleepSeconds * 1000000ULL);
