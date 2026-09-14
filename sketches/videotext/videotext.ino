@@ -31,7 +31,7 @@
 #include "config.example.h"
 #endif
 
-#define FW_VERSION "2.0.1"
+#define FW_VERSION "2.0.2"
 #define BUTTON_PIN 36
 #define SCREEN_FILE "/screen.json"
 #define DRAWN_HASH_FILE "/drawn.hash"
@@ -471,6 +471,7 @@ void handleGuide() {
     text += "\n\n";
     String http = vt::GUIDE_HTTP;
     http.replace("<ip>", ip.length() ? ip : String("<board IP>"));
+    http.replace("<host>", HOSTNAME ".local");
     text += http;
     text += "\n";
     server.send(200, "text/plain; charset=utf-8", text);

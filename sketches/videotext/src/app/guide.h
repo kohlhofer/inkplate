@@ -40,10 +40,10 @@ WORKING WITH THE WALL
 4. Keep it glanceable: a title that says what this is, then the facts that matter most, one per line.
 
 EXAMPLE
-title: "Cary, NC · Sunday"
-body: "{yellow}Partly sunny{/}  high 90°  low 72°\nShowers possible before 7am (20%)\nHumid morning, SW wind 6 mph"
-chart: {"type": "spark", "values": [73, 76, 81, 85, 88, 89, 85, 81, 78], "label": "°F, 7am to 11pm"}
-footer: "Source: National Weather Service")GUIDE";
+title: "Weather · Sunday"
+body: "{yellow}Partly sunny{/}  high 31°  low 22°\nShowers possible before 7am (20%)\nHumid morning, light southwest wind"
+chart: {"type": "spark", "values": [23, 24, 27, 29, 31, 31, 29, 27, 26], "label": "°C, 7am to 11pm"}
+footer: "Source: national weather service")GUIDE";
 
 inline const char* const GUIDE_HTTP = R"GUIDE(HTTP API
 Send the key with every request except GET /: either "X-Api-Key: <key>" or "Authorization: Bearer <key>". The key is in the board's config.h and on the screen that the button on the board's side brings up. Send JSON bodies with "Content-Type: application/json".
@@ -62,6 +62,6 @@ Errors come back as {"error": {"code": "...", "message": "..."}} with a message 
 CONNECTING AN AGENT
 Claude Code (use the IP address; Claude Code can't resolve .local names):
   claude mcp add --transport http videotext http://<ip>/mcp --header "X-Api-Key: <key>"
-Any other MCP client: a Streamable HTTP server at http://<ip>/mcp or http://videotext.local/mcp with the same header. The board shows its current IP on the screen the side button brings up.)GUIDE";
+Any other MCP client: a Streamable HTTP server at http://<ip>/mcp or http://<host>/mcp with the same header. The board shows its current IP on the screen the side button brings up.)GUIDE";
 
 }  // namespace vt
