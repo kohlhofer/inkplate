@@ -4,12 +4,18 @@ An e-paper wall display that agents can write to. Videotext is firmware for the 
 
 There is nothing to run on a computer. The board keeps the screen in flash, renders it with the Bedstead teletext font and refreshes the panel only when the screen changes.
 
-<p>
-  <img src="docs/screen-dark.png" width="400" alt="A dark videotext screen titled Deploys · Monday, with an hourly bar chart and three services marked green, yellow and red">
-  <img src="docs/screen-light.png" width="400" alt="A light videotext screen titled Weather · Monday, with a temperature chart and a short forecast">
-</p>
+<table>
+<tr>
+<td><img src="docs/screen-dark.png" width="400" alt="A dark videotext screen titled Deploys · Monday, with an hourly bar chart and three services marked green, yellow and red"></td>
+<td><img src="docs/screen-light.png" width="400" alt="A light videotext screen titled Weather · Monday, with a temperature chart and a short forecast"></td>
+</tr>
+<tr>
+<td><img src="docs/screen-equinox.png" width="400" alt="A videotext screen titled 9 days to the autumn equinox, with the sun's path across the sky on June 21, today and December 21 drawn in block characters over a green horizon"></td>
+<td><img src="docs/screen-news.png" width="400" alt="A videotext screen titled Sunday night headlines, with a block-character globe beside the top story and eight numbered headlines in the style of a teletext index page"></td>
+</tr>
+</table>
 
-Both images come from the firmware's own renderer. The panel shows the same pixels in slightly muted colours.
+All four images come from the firmware's own renderer. The panel shows the same pixels in slightly muted colours.
 
 > [!WARNING]
 > **Use at your own risk.** This firmware is provided "as is", without warranty of any kind, express or implied, including the warranties of merchantability, fitness for a particular purpose and non-infringement.
