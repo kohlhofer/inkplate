@@ -1,31 +1,38 @@
 # Inkplate 6COLOR build helpers around arduino-cli.
-#   make                                  compile sketches/hello
-#   make upload SKETCH=sketches/videotext
+#   make                                  compile the videotext firmware
+#   make upload                           compile and flash it (SKETCH=sketches/<name> for another sketch)
 #   make monitor
+#   make backup                           read the board's whole flash into firmware-backup/ first
 #   make log LOG_SECONDS=90               capture serial output without an interactive terminal
 #   make font                             regenerate the board's Bedstead font header
 #   make test-native                      compare the C++ renderer with the archived Node renderer
 #   make tailnet-install                  serve the wall in the tailnet from this Mac (login service)
 
-SKETCH ?= sketches/hello
+SKETCH ?= sketches/videotext
 FQBN   := soldered-inkplate-boards:esp32:Inkplate6COLOR
-PORT   ?= $(firstword $(wildcard /dev/cu.usbserial-*) $(wildcard /dev/cu.wchusbserial*))
+# macOS names the CH340 port cu.usbserial-* or cu.wchusbserial*, Linux ttyUSB*.
+PORT   ?= $(firstword $(wildcard /dev/cu.usbserial-*) $(wildcard /dev/cu.wchusbserial*) $(wildcard /dev/ttyUSB*))
 BUILD  := build/$(notdir $(SKETCH))
-BACKUP := firmware-backup/inkplate6color-full-flash-2026-09-12.bin
 
 TAILNET_PLIST := $(HOME)/Library/LaunchAgents/com.videotext.tailnet.plist
 VT_BOARD ?= http://videotext.local
 
-.PHONY: compile upload flash monitor log port restore-backup font test-native tailnet-install tailnet-uninstall
+.PHONY: compile upload check-upload flash monitor log port backup restore-backup font test-native tailnet-install tailnet-uninstall
 
 compile:
 	arduino-cli compile --fqbn $(FQBN) --output-dir $(BUILD) $(SKETCH)
 
-upload: compile
-	@test -n "$(PORT)" || (echo "No Inkplate serial port found. Is it plugged in and switched on?" && exit 1)
+# The firmware compiles without config.h (it falls back to config.example.h), but
+# a board flashed that way never joins WiFi, so upload refuses.
+upload: check-upload compile
 	arduino-cli upload --fqbn $(FQBN) --port $(PORT) --input-dir $(BUILD) $(SKETCH)
 
 flash: upload monitor
+
+check-upload:
+	@test -f sketches/videotext/config.h -o "$(SKETCH)" != sketches/videotext || \
+		(echo "sketches/videotext/config.h is missing: copy config.example.h to config.h and fill it in" && exit 1)
+	@test -n "$(PORT)" || (echo "No Inkplate serial port found. Is it plugged in and switched on?" && exit 1)
 
 monitor:
 	arduino-cli monitor --port $(PORT) --config baudrate=115200
@@ -42,20 +49,29 @@ log:
 port:
 	@echo $(PORT)
 
-# Writes the full 4MB image read off the board before any development started.
+# The whole 4 MB flash, at 115200 baud because the CH340 link corrupts long reads at
+# higher speeds. Takes about six minutes. restore-backup writes a saved image back.
+BACKUP ?= firmware-backup/inkplate6color-$(shell date +%Y-%m-%d).bin
+backup:
+	@test -n "$(PORT)" || (echo "No Inkplate serial port found. Is it plugged in and switched on?" && exit 1)
+	@mkdir -p firmware-backup
+	esptool --port $(PORT) --baud 115200 read-flash 0 0x400000 $(BACKUP)
+
 restore-backup:
+	@test -n "$(PORT)" || (echo "No Inkplate serial port found. Is it plugged in and switched on?" && exit 1)
+	@test -f "$(BACKUP)" || (echo "no image at $(BACKUP); pass BACKUP=firmware-backup/<file>.bin" && exit 1)
 	esptool --port $(PORT) --baud 115200 write-flash 0 $(BACKUP)
 
 # Regenerates sketches/videotext/src/render/font_data.h from font/bedstead.c.
 font:
 	node tools/generate-font-header.mjs
 
-# Builds the board's renderer and protocol code for the Mac. The renderer must
+# Builds the board's renderer and protocol code for the host. The renderer must
 # match the archived Node renderer pixel for pixel (test/native/compare.mjs);
 # the MCP handler, request validation and PNG encoder have their own checks.
 RENDER_SRC := sketches/videotext/src/render
 APP_SRC := sketches/videotext/src/app
-ARDUINOJSON ?= $(HOME)/Documents/Arduino/libraries/ArduinoJson/src
+ARDUINOJSON ?= $(shell arduino-cli config get directories.user)/libraries/ArduinoJson/src
 NATIVE := build/native
 
 test-native:
