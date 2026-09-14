@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "description": "Teletext-style single-screen wall display that runs on the Inkplate 6COLOR itself.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "test": "node --test 'archive/relay/test/*.test.js'",
