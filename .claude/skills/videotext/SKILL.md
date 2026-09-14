@@ -18,10 +18,12 @@ If the `videotext` MCP tools are available (`show_screen`, `preview_screen`, `ge
 2. Call `show_screen`, then look at the image in the result before telling anyone it's up. Fix every warning and send again.
 3. Only send when the content changed. Each new screen flashes the whole panel for about 30 seconds.
 
-If the tools aren't connected, the board still answers over HTTP. `curl http://videotext.local/` returns the full guide, including the HTTP API. The key is in `sketches/videotext/config.h` in the inkplate repo (`~/Development/inkplate` on this Mac), and the board shows it too when someone presses its side button. To connect Claude Code, use the board's IP address, because Claude Code can't resolve `.local` names:
+If the tools aren't connected, the board still answers over HTTP on its local network. `curl http://videotext.local/` returns the full guide, including the HTTP API; the name is different if whoever set the board up changed `HOSTNAME`. You need the board's address and API key. Pressing the button on the side of the board shows both, and they are in `sketches/videotext/config.h` in the repo that flashed it. Ask the person rather than guessing either one. A wall reached through Tailscale lives at `https://videotext.<tailnet>.ts.net` instead.
+
+To connect Claude Code, use the board's IP address or the tailnet name, because Claude Code can't resolve `.local` names:
 
 ```sh
 claude mcp add --scope user --transport http videotext http://<board-ip>/mcp --header "X-Api-Key: <key>"
 ```
 
-If the board doesn't answer, it's switched off or not on WiFi. Tell the person rather than retrying.
+If the board doesn't answer, it's switched off, not on WiFi, or on a network this machine can't reach. Tell the person rather than retrying.

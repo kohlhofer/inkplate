@@ -11,13 +11,15 @@ ESP32-S3) and by the string "Welcome to Inkplate 6COLOR!" in the old firmware.
 - Board index: `https://raw.githubusercontent.com/SolderedElectronics/Inkplate-Board-Definitions-for-Arduino-IDE/refs/heads/main/package_Inkplate_Boards_index.json`
   (the older Dasduino index ships `Inkplate_Boards:esp32`, which is outdated; don't use it).
 - Core `soldered-inkplate-boards:esp32`, FQBN `soldered-inkplate-boards:esp32:Inkplate6COLOR`.
-- Library `InkplateLibrary` (Arduino library manager). Examples live in
-  `~/Documents/Arduino/libraries/InkplateLibrary/examples/Inkplate6COLOR/`.
+- Libraries `InkplateLibrary` and `ArduinoJson` (Arduino library manager). Inkplate examples live in
+  `~/Documents/Arduino/libraries/InkplateLibrary/examples/Inkplate6COLOR/` on macOS.
+- Tested with arduino-cli 1.5.1, core 4.0.0, InkplateLibrary 11.1.5 and ArduinoJson 7.4.3.
 
 ## Workflow
 
-`make` compiles, `make upload SKETCH=sketches/<name>`, `make monitor`, `make flash` (upload then monitor).
-Each sketch is a folder under `sketches/` whose `.ino` matches the folder name.
+`make` compiles videotext, `make upload` flashes it (refusing without `config.h`), `make monitor`,
+`make flash` (upload then monitor). `SKETCH=sketches/<name>` picks another sketch; each is a folder
+under `sketches/` whose `.ino` matches the folder name.
 
 ## Hardware gotchas
 
@@ -33,8 +35,8 @@ Each sketch is a folder under `sketches/` whose `.ino` matches the folder name.
   `Inkplate6COLOR_Read_Touchpads` example crashes the same way.
 - `sketches/probe` reports what the board sees. On 2026-09-12: 4MB PSRAM, I2C devices 0x20
   (PCAL6416A expander) and 0x51 (PCF85063A RTC), RTC unset, battery ADC 4.23 V, no SD card.
-- `firmware-backup/` holds the full 4MB image read off the board before development;
-  `make restore-backup` writes it back.
+- `make backup` reads the whole 4 MB flash into the gitignored `firmware-backup/`;
+  `make restore-backup BACKUP=<file>` writes one back.
 
 ## videotext
 
@@ -58,8 +60,8 @@ so a 30 s refresh on core 0 doesn't trip the watchdog.
 
 Tailnet access (`tailnet/`, README "Reaching the Wall over Tailscale"): the board can't run
 Tailscale, so an always-on Mac runs a second userspace `tailscaled` named `videotext`
-that serves HTTPS and forwards to the board. It is meant to run on the Mac Studio once
-that arrives; the MacBook only tested it (2026-09-13, ephemeral node). Gotchas: Unix socket
+that serves HTTPS and forwards to the board. It has been tested with an ephemeral node
+(2026-09-13). Gotchas: Unix socket
 paths over ~104 bytes fail with "bind: invalid argument", so keep `VT_TS_STATE` short;
 `tailscale up` must keep running until login completes, or the auth URL dies with
 "http 410: auth path not found"; the Homebrew formula stays unlinked so the Tailscale
