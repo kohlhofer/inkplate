@@ -49,10 +49,10 @@ async function withServer(fn) {
 
 test("serve only offers private LAN addresses for RELAY_HOST, not VPN ones", async () => {
     const { isPrivateLan } = await import("../src/cli/commands/serve.js");
-    assert.equal(isPrivateLan("192.168.86.227"), true);
+    assert.equal(isPrivateLan("192.168.1.27"), true);
     assert.equal(isPrivateLan("10.0.0.5"), true);
     assert.equal(isPrivateLan("172.20.1.1"), true);
-    assert.equal(isPrivateLan("100.84.233.111"), false);
+    assert.equal(isPrivateLan("100.64.0.1"), false);
     assert.equal(isPrivateLan("172.32.0.1"), false);
 });
 

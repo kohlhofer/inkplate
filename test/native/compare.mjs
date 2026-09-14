@@ -44,7 +44,7 @@ const ELLIPSIS = "…";
 
 // ---------------------------------------------------------------- fixtures
 
-const HEADER = { headerLeft: "VIDEOTEXT", headerRight: "updated Sun 13 Sep 14:05", footer: "wall display · 192.168.86.40" };
+const HEADER = { headerLeft: "VIDEOTEXT", headerRight: "updated Sun 13 Sep 14:05", footer: "wall display · 192.168.1.40" };
 
 const FENCED_ART = [
     "```",

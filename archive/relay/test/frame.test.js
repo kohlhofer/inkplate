@@ -113,7 +113,7 @@ test("the header's page number is drawn in the theme's accent colour", () => {
 
 test("a long footer is cut with an ellipsis and keeps two blank cells before the expiry", () => {
     const page = { ...textPage(""), number: 205 };
-    const liveSummaries = [{ number: 205, title: "a" }, { number: 301, title: "Cary, NC · Sunday 13 Sep weather" }];
+    const liveSummaries = [{ number: 205, title: "a" }, { number: 301, title: "Hometown · Sunday 13 Sep weather" }];
     const { indices } = renderFrame(205, { page, liveSummaries }, board({}), THEMES.dark, NOW);
     const footerTop = 8 + 17 * 24;
     // "expires Sun 09:00" is 17 cells, right-aligned in the 48 text cells (0-47): it starts at
