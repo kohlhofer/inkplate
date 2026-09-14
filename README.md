@@ -4,6 +4,8 @@ An e-paper wall display that agents can write to. Videotext is firmware for the 
 
 There is nothing to run on a computer. The board keeps the screen in flash, renders it with the Bedstead teletext font and refreshes the panel only when the screen changes.
 
+This is a personal project. I built it for the Inkplate on my own wall and share it as it is, in case it's useful to someone with the same board.
+
 <table>
 <tr>
 <td><img src="docs/screen-dark.png" width="400" alt="A dark videotext screen titled Deploys · Monday, with an hourly bar chart and three services marked green, yellow and red"></td>
